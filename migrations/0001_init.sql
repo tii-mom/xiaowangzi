@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS payment_orders (
     amount_cents    INTEGER NOT NULL,
     pay_type        TEXT,
     status          TEXT NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending', 'paid', 'expired', 'failed', 'refunded')),
+                    CHECK (status IN ('pending', 'processing', 'paid', 'expired', 'failed', 'refunded')),
     raw_notify_json TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     paid_at         TEXT

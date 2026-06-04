@@ -3,11 +3,17 @@
 import React from 'react';
 import { Moon, CheckCircle2 } from 'lucide-react';
 
-interface PricingCardsProps {
-  onAlert: (title: string, message: string) => void;
+export interface PlanSelection {
+  id: string;
+  name: string;
+  amount_cents: number;
 }
 
-export default function PricingCards({ onAlert }: PricingCardsProps) {
+interface PricingCardsProps {
+  onSelectPlan: (plan: PlanSelection) => void;
+}
+
+export default function PricingCards({ onSelectPlan }: PricingCardsProps) {
   return (
     <section className="space-y-8" id="section-pricing">
       <div className="text-center space-y-3">
@@ -50,8 +56,8 @@ export default function PricingCards({ onAlert }: PricingCardsProps) {
             </ul>
           </div>
           <div className="space-y-3 pt-4">
-            <button 
-              onClick={() => onAlert("🌱 免费唤醒流程指导","支付系统已切换为原型测试环境。您现在可以直接进入下方的【绑定卡片】章节，进行微信 Clawbot 扫码。绑定即代表自动获得免费 3 天至臻守护包，无需任何先期扣款！")}
+            <button
+              onClick={() => onSelectPlan({ id: 'free_trial', name: '免费体验', amount_cents: 0 })}
               className="w-full py-2.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 active:scale-95 transition-all text-slate-100 rounded-lg cursor-pointer"
             >
               免费开始体验
@@ -102,8 +108,8 @@ export default function PricingCards({ onAlert }: PricingCardsProps) {
             </ul>
           </div>
           <div className="space-y-3 pt-4">
-            <button 
-              onClick={() => onAlert("🌒 月光陪伴版订阅声明","当前为 MVP 互动原型展示，支付功能暂未对外进行商业化接入。待整体公测完毕后会率先在各大社群推送。感谢您的倾心驻足与深思！")}
+            <button
+              onClick={() => onSelectPlan({ id: 'monthly', name: '月光陪伴版', amount_cents: 2900 })}
               className="w-full py-2.5 text-xs font-bold bg-gradient-to-r from-amber-300 to-amber-500 hover:from-amber-400 hover:to-amber-600 active:scale-95 transition-all text-slate-950 rounded-lg cursor-pointer"
             >
               选择月光陪伴
@@ -144,8 +150,8 @@ export default function PricingCards({ onAlert }: PricingCardsProps) {
             </ul>
           </div>
           <div className="space-y-3 pt-4">
-            <button 
-              onClick={() => onAlert("🎨 星球成长版订阅申明","非常感激您对星球成长版深度探索套包的关注！支付功能当前暂未对外开放，产品仍处于纯前端 MVP 产品原型和高保真体验测试期。您可前往绑定页面体验完整的小王子机器人。")}
+            <button
+              onClick={() => onSelectPlan({ id: 'quarterly', name: '星球成长版', amount_cents: 9900 })}
               className="w-full py-2.5 text-xs font-bold bg-indigo-900/50 hover:bg-slate-800 text-indigo-200 active:scale-95 transition-all rounded-lg cursor-pointer"
             >
               选择星球成长

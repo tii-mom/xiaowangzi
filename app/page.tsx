@@ -11,7 +11,8 @@ import ActionCard from '@/components/ActionCard';
 import NightQuestions from '@/components/NightQuestions';
 import AvatarBlindBox from '@/components/AvatarBlindBox';
 import BindFlowMock from '@/components/BindFlowMock';
-import PricingCards from '@/components/PricingCards';
+import PricingCards, { type PlanSelection } from '@/components/PricingCards';
+import PaymentModal from '@/components/PaymentModal';
 import SafetyNote from '@/components/SafetyNote';
 import Footer from '@/components/Footer';
 import { PRESET_FORTUNES } from '@/lib/constants';
@@ -34,6 +35,8 @@ export default function Home() {
   const [actionDone, setActionDone] = useState(false);
   const [actionDoneMsg, setActionDoneMsg] = useState('');
 
+  const [paymentPlan, setPaymentPlan] = useState<PlanSelection | null>(null);
+
   const triggerToast = useCallback((msg: string) => {
     setToastMsg(msg);
     setTimeout(() => {
@@ -46,6 +49,17 @@ export default function Home() {
     setModalContent(message);
     setModalOpen(true);
   }, []);
+
+  const handleSelectPlan = useCallback((plan: PlanSelection) => {
+    if (plan.id === 'free_trial') {
+      openAlert(
+        '🌱 免费唤醒流程指导',
+        '免费体验版暂无付费流程。您可以直接进入下方的「绑定卡片」章节完成绑定，绑定即代表自动获得免费 3 天至臻守护包，无需任何先期扣款！',
+      );
+      return;
+    }
+    setPaymentPlan(plan);
+  }, [openAlert]);
 
   const scrollToId = useCallback((id: string) => {
     const el = document.getElementById(id);
@@ -243,7 +257,7 @@ export default function Home() {
 
         <BindFlowMock onToast={triggerToast} onAlert={openAlert} />
 
-        <PricingCards onAlert={openAlert} />
+        <PricingCards onSelectPlan={handleSelectPlan} />
 
         <SafetyNote />
       </main>
@@ -256,6 +270,15 @@ export default function Home() {
         content={modalContent}
         onClose={() => setModalOpen(false)}
       />
+
+      {paymentPlan && (
+        <PaymentModal
+          key={paymentPlan.id}
+          open={!!paymentPlan}
+          onClose={() => setPaymentPlan(null)}
+          plan={paymentPlan}
+        />
+      )}
     </div>
   );
 }
