@@ -79,7 +79,7 @@ export function verifyNotifySign(
   return expected === params.sign;
 }
 
-export function createBufPayOrder(
+export async function createBufPayOrder(
   aid: string,
   params: BufPayCreateParams,
   appSecret: string,
@@ -102,29 +102,55 @@ export function createBufPayOrder(
   const apiUrl = baseUrl ?? 'https://bufpay.com';
   const url = `${apiUrl}/api/pay/${aid}`;
 
-  return fetch(url, {
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
     },
     body: body.toString(),
-  }).then(async (res) => {
-    const data = await res.json();
-    if (res.ok && data.status === 'ok') {
-      return data as BufPayCreateResult;
-    }
-    throw new Error(`BufPay create-order failed: status=${data.status}, info=${data.info ?? '--'}`);
   });
+
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => '(unable to read body)');
+    const preview = bodyText.length > 300 ? bodyText.slice(0, 300) + '...' : bodyText;
+    throw new Error(`BufPay create-order HTTP ${res.status}: ${preview}`);
+  }
+
+  let data: BufPayCreateResult & { info?: string };
+  try {
+    data = await res.json();
+  } catch (parseErr) {
+    throw new Error(`BufPay create-order JSON parse failed: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
+  }
+
+  if (data.status === 'ok') {
+    return data;
+  }
+
+  throw new Error(`BufPay create-order failed: status=${data.status}, info=${data.info ?? '--'}`);
 }
 
-export function queryBufPayOrder(
+export async function queryBufPayOrder(
   aoid: string,
   baseUrl?: string,
 ): Promise<BufPayQueryResult> {
   const apiUrl = baseUrl ?? 'https://bufpay.com';
   const url = `${apiUrl}/api/query/${aoid}`;
 
-  return fetch(url)
-    .then((res) => res.json())
-    .then((data) => data as BufPayQueryResult);
+  const res = await fetch(url);
+
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => '(unable to read body)');
+    const preview = bodyText.length > 300 ? bodyText.slice(0, 300) + '...' : bodyText;
+    throw new Error(`BufPay query HTTP ${res.status}: ${preview}`);
+  }
+
+  let data: BufPayQueryResult;
+  try {
+    data = await res.json();
+  } catch (parseErr) {
+    throw new Error(`BufPay query JSON parse failed: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
+  }
+
+  return data;
 }

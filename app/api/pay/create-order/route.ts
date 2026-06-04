@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { requireEnv } from '@/lib/env';
-import { PLANS, planIdToLabel, centsToPriceYuan } from '@/lib/plans';
+import { PLANS, centsToPriceYuan } from '@/lib/plans';
 import { createBufPayOrder } from '@/lib/bufpay';
+import { getPaymentUser, PaymentAuthError } from '@/lib/payment-user';
 
 function generateOrderId(): string {
   const ts = Date.now().toString(36);
@@ -11,6 +12,8 @@ function generateOrderId(): string {
 }
 
 export async function POST(req: NextRequest) {
+  let orderId: string | null = null;
+
   try {
     const { plan: planId } = await req.json();
 
@@ -29,38 +32,34 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const userId = req.headers.get('x-user-id') ?? 'demo-user';
-    const db = getDb();
-
-    const existing = await db.query(
-      'SELECT id FROM users WHERE id = ? OR hermes_user_id = ? OR wechat_external_id = ?',
-      [userId, userId, userId],
-    );
-    let dbUserId: number;
-    if (existing.results.length === 0) {
-      const insert = await db.execute(
-        'INSERT INTO users (id, token_balance, status) VALUES (?, 0, ?)',
-        [userId, 'active'],
-      );
-      dbUserId = (insert.meta?.last_row_id ?? 1) as number;
-    } else {
-      dbUserId = existing.results[0].id as number;
+    let user;
+    try {
+      user = await getPaymentUser(req);
+    } catch (err) {
+      if (err instanceof PaymentAuthError) {
+        return NextResponse.json(
+          { error: err.message },
+          { status: err.status },
+        );
+      }
+      throw err;
     }
-
-    const orderId = generateOrderId();
-    const priceYuan = centsToPriceYuan(plan.amount_cents);
-
-    await db.execute(
-      `INSERT INTO payment_orders
-       (user_id, order_id, plan, tokens_amount, amount_cents, pay_type, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-      [dbUserId, orderId, planId, plan.tokens_amount, plan.amount_cents, plan.pay_type],
-    );
 
     const aid = requireEnv('BUFPAY_AID');
     const appSecret = requireEnv('BUFPAY_APP_SECRET');
     const notifyUrl = requireEnv('BUFPAY_NOTIFY_URL');
     const returnUrl = process.env.BUFPAY_RETURN_URL ?? '';
+
+    const db = getDb();
+    const priceYuan = centsToPriceYuan(plan.amount_cents);
+    orderId = generateOrderId();
+
+    await db.execute(
+      `INSERT INTO payment_orders
+       (user_id, order_id, plan, tokens_amount, amount_cents, pay_type, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+      [user.id, orderId, planId, plan.tokens_amount, plan.amount_cents, plan.pay_type],
+    );
 
     const bufpayResult = await createBufPayOrder(
       aid,
@@ -69,7 +68,7 @@ export async function POST(req: NextRequest) {
         pay_type: plan.pay_type,
         price: priceYuan,
         order_id: orderId,
-        order_uid: String(dbUserId),
+        order_uid: String(user.id),
         notify_url: notifyUrl,
         return_url: returnUrl,
       },
@@ -95,6 +94,23 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error('[create-order]', err);
+
+    if (orderId) {
+      try {
+        const db = getDb();
+        await db.execute(
+          "UPDATE payment_orders SET status = 'failed' WHERE order_id = ? AND status = 'pending'",
+          [orderId],
+        );
+        await db.execute(
+          "INSERT INTO system_events (type, payload) VALUES ('payment.create_failed', ?)",
+          [JSON.stringify({ order_id: orderId, error: err instanceof Error ? err.message : String(err) })],
+        );
+      } catch (logErr) {
+        console.error('[create-order] failed to log failure:', logErr);
+      }
+    }
+
     return NextResponse.json(
       { error: err instanceof Error ? err.message : '创建订单失败' },
       { status: 500 },

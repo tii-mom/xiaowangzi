@@ -46,7 +46,6 @@ export default function PaymentModal({ open, onClose, plan }: PaymentModalProps)
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-id': 'demo-user',
         },
         body: JSON.stringify({ plan: plan.id }),
       });

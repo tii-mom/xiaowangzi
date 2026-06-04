@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { queryBufPayOrder } from '@/lib/bufpay';
-import { requireEnv } from '@/lib/env';
+import { finalizePaidOrder } from '@/lib/payment-finalizer';
 
 export async function GET(req: NextRequest) {
   try {
@@ -37,9 +37,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ status: 'not_exist' });
     }
 
-    const localStatus = order.status as string;
-
-    if (localStatus === 'paid') {
+    if (order.status === 'paid') {
       return NextResponse.json({
         status: 'paid',
         order_id: order.order_id,
@@ -50,17 +48,37 @@ export async function GET(req: NextRequest) {
     }
 
     const dbAoid = (order.bufpay_aoid as string) ?? '';
-    if (dbAoid) {
+    const effectiveAoid = aoid ?? dbAoid;
+
+    if (effectiveAoid) {
       try {
-        const bufpayResult = await queryBufPayOrder(dbAoid);
+        const bufpayResult = await queryBufPayOrder(effectiveAoid);
 
         if (bufpayResult.status === 'success' || bufpayResult.status === 'payed') {
-          return NextResponse.json({
-            status: 'paid',
-            raw_bufpay_status: bufpayResult.status,
-            order_id: order.order_id,
+          const finalizeResult = await finalizePaidOrder({
+            order_id: (order.order_id as string) ?? '',
+            aoid: effectiveAoid,
+            order_uid: String(order.user_id),
+            price: String(order.amount_cents ?? '0'),
+            pay_price: String(order.amount_cents ?? '0'),
           });
+
+          if (finalizeResult.status === 'ok' || finalizeResult.status === 'already_finalized') {
+            const refreshed = await db.query(
+              'SELECT * FROM payment_orders WHERE order_id = ?',
+              [order.order_id],
+            );
+            const refreshedOrder = refreshed.results[0] as Record<string, unknown> | undefined;
+            return NextResponse.json({
+              status: refreshedOrder?.status === 'paid' ? 'paid' : 'pending',
+              order_id: order.order_id,
+              plan: refreshedOrder?.plan ?? order.plan,
+              tokens_amount: refreshedOrder?.tokens_amount ?? order.tokens_amount,
+              amount_cents: refreshedOrder?.amount_cents ?? order.amount_cents,
+            });
+          }
         }
+
         return NextResponse.json({
           status: 'pending',
           raw_bufpay_status: bufpayResult.status,
@@ -72,7 +90,7 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
-      status: localStatus,
+      status: order.status,
       order_id: order.order_id,
       plan: order.plan,
     });
