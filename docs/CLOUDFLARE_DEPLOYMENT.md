@@ -263,25 +263,49 @@ npm run cf:typegen
 > **说明**: 远端 staging 不等于生产上线。这是 Cloudflare Workers 的 POC staging 环境。  
 > **APP_URL / NEXT_PUBLIC_APP_URL**: staging 环境指向 `https://xiaowangzi.348421501.workers.dev`，配置在 `wrangler.jsonc` 的 `vars` 中。
 
-### BufPay Staging 验证结果（PR-CF4 — 支付联调）
+### BufPay Staging 验证结果（PR-CF4a — notify/finalize 联调）
 
 > **验证日期**: 2026-06-04  
 > **远端 URL**: `https://xiaowangzi.348421501.workers.dev`  
+> **验证状态**: **PR-CF4a 子链路已通过**，**完整支付 E2E (PR-CF4b) 仍处于 Blocked 状态**。
 
-| 测试项 | 状态 | 详情 |
-|--------|------|------|
-| BufPay notify x-www-form-urlencoded 解析 | ✅ | URLSearchParams 正常 |
-| BufPay MD5 签名验证（正确 sign） | ✅ | 验签通过，进入 finalizePaidOrder |
-| BufPay MD5 签名验证（错误 sign） | ✅ | 400 "sign error" |
-| payment_orders 状态转换 | ✅ | pending → processing → paid |
-| token_ledger purchase 写入 | ✅ | +10000 tokens, source=bufpay |
-| token_ledger 幂等（重复 notify） | ✅ | cnt=1，不重复写入 |
-| user token_balance 增加 | ✅ | 10000 → 20000 |
-| subscriptions 写入 | ✅ | plan=monthly, status=active |
-| 错误金额（amount mismatch） | ✅ | 500 "amount mismatch" |
-| BufPay create-order API 创建订单 | ⚠️ | BufPay API 返回 HTML，远端 Worker 无法创建真实订单 |
+#### 1. 已验证通过 (Staging Verification Passed)
+- **BufPay notify x-www-form-urlencoded 解析**: 成功解析回调表单。
+- **MD5 正确签名验签**: 正确签名可以通过验签，订单转换为 `paid`。
+- **错误签名拒绝**: 签名错误返回 `400 sign error`。
+- **错误金额拒绝**: 回调金额与数据库不匹配时返回 `500 amount mismatch`（使用全新 pending 订单独立验证，不影响已支付订单）。
+- **订单状态自动流转**: `payment_orders` 状态从 `pending` -> `paid`。
+- **token_ledger purchase 写入**: 成功写入账本 `purchase` 记录，`delta_tokens` 额度匹配订单套餐。
+- **用户余额 token_balance 累加**: 用户余额按账本成功增加。
+- **订阅激活 (subscriptions)**: 成功写入 active 状态订阅记录，绑定 `monthly` 或 `quarterly` 计划。
+- **回调幂等性防重**: 重复回调返回 `200 ok`，但记账记录与用户余额不重复增加。
 
-> **已知问题**: BufPay `https://bufpay.com/api/pay/{aid}` 在 Cloudflare Workers 远端返回 HTML 页面而非 JSON。已通过 D1 直接创建 pending 订单 + 真实签名 notify 验证支付闭环的 notify/finalize 链路。create-order 链路待 BufPay 服务恢复后验证。
+#### 2. 未验证通过 / 待完成 (Pending E2E Verification)
+- **BufPay create-order 远端真实链路**: 尚未联通。
+- **用户真实支付入口与二维码展示**: 尚未验证。
+- **完整支付 E2E 闭环**: 尚未通过。
+
+#### 3. 当前 Blocker (商户配置阻塞)
+- **现象**: 调用 `/api/pay/create-order` 向 BufPay 创建订单时，BufPay API 响应 HTTP 200 的 HTML 报错页（页面含 `<h2>付款码不足，请上传不固定金额二维码</h2>`）。
+- **根因**: 商户账号在 BufPay 后台缺少对应套餐金额的付款码，或未上传“不固定金额”通用付款码。
+- **解决条件**: 商户需在 BufPay 后台上传对应金额的二维码或不固定金额二维码。
+
+#### 4. 联调验证测试指令
+- **测试子链路（结算记账与幂等）**:
+  ```bash
+  BASE_URL=https://xiaowangzi.348421501.workers.dev \
+  BUFPAY_APP_SECRET=$BUFPAY_APP_SECRET \
+  npx tsx scripts/test-bufpay-notify-finalizer.ts
+  ```
+  *(注: 此脚本使用 D1 REST API 直连远程数据库，插入 pending 订单并模拟回调，预期通过 Exit 0)*
+
+- **测试完整链路 (E2E)**:
+  ```bash
+  BASE_URL=https://xiaowangzi.348421501.workers.dev \
+  BUFPAY_APP_SECRET=$BUFPAY_APP_SECRET \
+  npx tsx scripts/test-bufpay-staging.ts
+  ```
+  *(注: 此脚本尝试通过 API 创建真实订单，当前由于商户配置 blocker 预期失败 Exit 1)*
 
 ### 已知限制
 

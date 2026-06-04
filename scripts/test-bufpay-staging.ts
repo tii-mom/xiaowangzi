@@ -65,7 +65,12 @@ async function main() {
     body: JSON.stringify({ plan: planId }),
   });
   assert(co.status === 200, `create-order status: ${co.status}`);
-  if (co.status !== 200) { console.error(`  body: ${JSON.stringify(co.body)}`); process.exit(1); }
+  if (co.status !== 200) {
+    console.error(`\n  ❌ 完整支付链路失败：创建订单接口返回错误。`);
+    console.error(`  错误详情: ${JSON.stringify(co.body)}`);
+    console.error(`  可能原因: BufPay 商户后台缺少对应套餐金额的付款二维码或不固定金额二维码。`);
+    process.exit(1);
+  }
   const coBody = co.body as Record<string, unknown>;
   const orderId = coBody.order_id as string;
   const aoid = coBody.aoid as string;
