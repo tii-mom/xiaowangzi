@@ -167,37 +167,38 @@ npm run cf:typegen
 
 ## Workers Runtime 兼容性
 
-### 未验证项汇总（PR-CF1 状态）
-
-下列功能因缺少环境变量或凭据，在 Cloudflare Preview 中**尚未验证**：
-
-| 功能 | 缺少的配置 | 影响 |
-|------|-----------|------|
-| **D1 REST Adapter** | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_DATABASE_ID`, `CLOUDFLARE_API_TOKEN` | 无法使用真实 D1，仅 MockAdapter |
-| **DeepSeek fetch** | `DEEPSEEK_API_KEY` 未在 worker env 设置 | 无法测试 `/api/chat/send` |
-| **BufPay notify** | 支付 env / 回调地址未配置 | 无法测试支付入账全链路 |
-| **HermesAgentManager** | Hermes 未经验证 | 不可设置 `AGENT_BACKEND=hermes` |
-
-### 已验证（PR-CF1 首次验证）
+### 未验证项汇总（PR-CF1.5 状态）
 
 | 功能 | 状态 | 备注 |
 |------|------|------|
-| API Routes (Route Handlers) | ✅ 通过 | `/api/health`、`/api/auth/web-session` 等 |
-| Cookie set/read | ✅ 通过 | `auth_token` cookie 正常设置和读取 |
-| POST body JSON 解析 | ✅ 通过 | web-session、chat/send 等正常 |
-| x-www-form-urlencoded body 解析 | ⏭️ 未验证 | BufPay notify 使用，本地 POC 未测试 |
-| node:crypto / crypto.randomBytes | ✅ 通过 | `nodejs_compat` 已启用，crypto 正常 |
-| DeepSeek fetch | ⏭️ 未配置 | DEEPSEEK_API_KEY 未在 .dev.vars 中设置 |
-| D1 REST Adapter fetch | ⏭️ 未验证 | CLOUDFLARE_DATABASE_ID 未配置 |
-| MockAdapter (内存数据库) | ✅ 通过 | DATABASE_ADAPTER=mock 正常 |
-| auth_sessions 创建 | ✅ 通过 | web-session 创建用户和 session |
-| token_ledger 写入 | ✅ 通过 | free_trial grant 正常写入 |
-| payment_orders 写入 | ⏭️ 未验证 | 需要 BUFPAY 配置 |
-| conversations 写入 | ⏭️ 未验证 | 需要 DEEPSEEK_API_KEY |
-| system_events 写入 | ⏭️ 未验证 | 需要 D1 或 MockAdapter |
-| Chat usage finalizer | ⏭️ 未验证 | 需要 DEEPSEEK_API_KEY |
-| Payment finalizer | ⏭️ 未验证 | 需要 BUFPAY 配置 |
-| Admin overview | ⏭️ 未验证 | 本地 POC 使用 MockAdapter，admin 需 ADMIN_TOKEN |
+| **HermesAgentManager** | ⏭️ 未验证 | Hermes 未验证，不可设置 `AGENT_BACKEND=hermes` |
+| **BufPay 端到端支付** | ⚠️ 部分验证 | 签名验证通过（见下方），订单创建需完整 auth session |
+
+### Staging 验证结果（PR-CF1.5 — Cloudflare D1 + DeepSeek）
+
+> **验证日期**: 2026-06-04  
+> **D1 数据库**: `xiaowangzi-staging` (83f12b1f-885e-4616-a7ff-4016dbdacef2)  
+> **Preview URL**: `http://localhost:8787` (Cloudflare workerd runtime)  
+> **说明**: 所有验证使用 **真实 D1 REST Adapter**（非 MockAdapter），数据直接查询 D1 确认。
+
+| 功能 | 状态 | D1 验证 | 详情 |
+|------|------|---------|------|
+| API Routes (Route Handlers) | ✅ | N/A | `/api/health`、`/api/auth/web-session` 等 |
+| Cookie set/read | ✅ | N/A | `auth_token` cookie |
+| POST body JSON 解析 | ✅ | N/A | web-session、chat/send |
+| x-www-form-urlencoded body 解析 | ✅ | N/A | BufPay notify `URLSearchParams` 解析 |
+| BufPay MD5 签名验证 | ✅ | N/A | 正确签名通过，错误签名 400 拒绝 |
+| node:crypto / crypto.randomBytes | ✅ | N/A | `nodejs_compat` 已启用 |
+| **D1 REST Adapter** | ✅ | ✅ | 真实 D1 读写，users 表 2 条记录 |
+| **auth_sessions 创建** | ✅ | ✅ | 2 个 session 持久化到 D1 |
+| **token_ledger 写入 (grant)** | ✅ | ✅ | grant: +10000, source=free_trial |
+| **token_ledger 写入 (usage)** | ✅ | ✅ | usage: -598, balance_after=9402 |
+| **DeepSeek fetch** | ✅ | N/A | 真实 API 调用，小王子正常回复 |
+| **conversations 写入** | ✅ | ✅ | user + assistant 消息持久化 |
+| **Chat usage finalizer** | ✅ | ✅ | 598 tokens 正确扣减，balance: 10000→9402 |
+| **Admin overview** | ✅ | ✅ | users_count: 2 |
+| Payment finalizer | ⚠️ | N/A | 签名验证通过，订单创建需额外步骤 |
+| system_events 写入 | ⏭️ | 未测试 | 未触发系统事件 |
 
 ### 已知限制
 
