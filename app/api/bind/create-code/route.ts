@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     const db = getDb();
 
     const existing = await db.query(
-      "SELECT id, code FROM bind_codes WHERE user_id = ? AND status = 'pending' AND expires_at > datetime('now')",
+      "SELECT id, code, expires_at FROM bind_codes WHERE user_id = ? AND status = 'pending' AND expires_at > datetime('now')",
       [user.id],
     );
 
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         code: row.code,
         status: 'pending',
-        expires_at: null,
+        expires_at: row.expires_at,
         message: '已有有效绑定码',
       });
     }

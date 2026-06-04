@@ -1,32 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 
-/**
- * Hermes Webhook 回调
- *
- * 接收 Hermes Agent 推送的微信消息事件。
- * 主要处理：用户发送绑定码 → 完成 user ↔ hermes_user_id 绑定。
- *
- * Hermes 原生 webhook 格式未验证，当前实现基于常见 bot 平台假设。
- */
+function validateWebhookSecret(req: NextRequest): boolean {
+  const nodeEnv = process.env.NODE_ENV ?? 'development';
+  const secret = process.env.HERMES_WEBHOOK_SECRET;
+
+  if (!secret || secret.trim() === '') {
+    if (nodeEnv === 'production') {
+      return false;
+    }
+    console.warn('[webhook/hermes] HERMES_WEBHOOK_SECRET not set — accepting all requests in dev');
+    return true;
+  }
+
+  const headerSecret = req.headers.get('x-hermes-secret');
+  if (headerSecret && headerSecret === secret) return true;
+
+  const authHeader = req.headers.get('authorization');
+  if (authHeader) {
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+    if (token === secret) return true;
+  }
+
+  return false;
+}
+
+async function writeSystemEvent(type: string, payload: Record<string, unknown>) {
+  try {
+    const db = getDb();
+    await db.execute('INSERT INTO system_events (type, payload) VALUES (?, ?)', [type, JSON.stringify(payload)]);
+  } catch { /* best-effort */ }
+}
+
 export async function POST(req: NextRequest) {
   try {
+    if (!validateWebhookSecret(req)) {
+      console.error('[webhook/hermes] secret validation failed');
+      return new NextResponse('forbidden', { status: 403 });
+    }
+
     const body = await req.json().catch(() => ({}));
+    console.log('[webhook/hermes] received');
 
-    console.log('[webhook/hermes] received:', JSON.stringify(body).slice(0, 500));
-
-    const eventType = body.event_type ?? body.type ?? 'unknown';
     const message = body.message ?? body.text ?? body.content ?? '';
     const hermesUserId = body.user_id ?? body.from_user ?? body.sender ?? '';
 
     if (!hermesUserId) {
-      console.error('[webhook/hermes] missing user_id in payload');
+      console.error('[webhook/hermes] missing user_id');
       return NextResponse.json({ error: 'missing user_id' }, { status: 400 });
     }
 
     const db = getDb();
+    const normalizedMessage = String(message).trim().toUpperCase();
+    const bindMatch = normalizedMessage.match(/^[A-F0-9]{8}$/);
 
-    const bindMatch = (message as string).match(/^[A-F0-9]{8}$/);
     if (bindMatch) {
       const code = bindMatch[0];
       const codes = await db.query(
@@ -36,31 +63,55 @@ export async function POST(req: NextRequest) {
 
       if (codes.results.length > 0) {
         const bindCode = codes.results[0] as Record<string, unknown>;
+        const userId = bindCode.user_id as number;
 
-        await db.execute(
-          "UPDATE bind_codes SET status = 'used', hermes_user_id = ? WHERE id = ?",
+        const updateResult = await db.execute(
+          "UPDATE bind_codes SET status = 'used', hermes_user_id = ? WHERE id = ? AND status = 'pending'",
           [hermesUserId, bindCode.id],
         );
 
-        const userId = bindCode.user_id as number;
+        if ((updateResult.meta?.changes ?? 0) === 0) {
+          await writeSystemEvent('bind.already_used', { code });
+          console.log(`[webhook/hermes] bind code already used: ${code}`);
+          return NextResponse.json({ ok: true });
+        }
+
+        const existingUsers = await db.query(
+          'SELECT hermes_user_id FROM users WHERE id = ?', [userId],
+        );
+        const currentHermesId = (existingUsers.results[0]?.hermes_user_id as string) ?? null;
+
+        if (currentHermesId) {
+          if (currentHermesId === hermesUserId) {
+            await writeSystemEvent('bind.already_bound_same', { user_id: userId, hermes_user_id: hermesUserId });
+            return NextResponse.json({ ok: true });
+          }
+          await writeSystemEvent('bind.conflict', { user_id: userId, existing: currentHermesId, attempted: hermesUserId });
+          console.error(`[webhook/hermes] bind conflict: user=${userId} existing=${currentHermesId} attempted=${hermesUserId}`);
+          return NextResponse.json({ ok: true });
+        }
+
         await db.execute(
           'UPDATE users SET hermes_user_id = ?, updated_at = datetime(\'now\') WHERE id = ?',
           [hermesUserId, userId],
         );
 
-        await db.execute(
-          "INSERT INTO user_agents (user_id, status) VALUES (?, 'pending')",
+        const existingAgents = await db.query(
+          "SELECT id FROM user_agents WHERE user_id = ? AND status IN ('pending', 'active') LIMIT 1",
           [userId],
         );
+        if (existingAgents.results.length === 0) {
+          await db.execute(
+            "INSERT INTO user_agents (user_id, status) VALUES (?, 'pending')",
+            [userId],
+          );
+        }
 
-        await db.execute(
-          'INSERT INTO system_events (type, payload) VALUES (?, ?)',
-          ['bind.success', JSON.stringify({ user_id: userId, hermes_user_id: hermesUserId, code })]
-        );
-
-        console.log(`[webhook/hermes] bind success: user=${userId}, hermes=${hermesUserId}`);
+        await writeSystemEvent('bind.success', { user_id: userId, hermes_user_id: hermesUserId });
+        console.log(`[webhook/hermes] bind success: user=${userId}`);
       } else {
-        console.log(`[webhook/hermes] invalid/expired bind code: ${code}`);
+        await writeSystemEvent('bind.invalid_code', { code });
+        console.log(`[webhook/hermes] invalid/expired code`);
       }
     }
 

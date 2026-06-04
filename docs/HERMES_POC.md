@@ -45,6 +45,15 @@ Hermes Agent 是微信 Bot 消息网关，负责：
 
 ### 方案 B: iLink / 微信开放平台（如 Hermes 原生支持）
 
+## Webhook 安全策略
+
+- `HERMES_WEBHOOK_SECRET` 环境变量用于 webhook 认证
+- 校验方式：`x-hermes-secret` header 或 `Authorization: Bearer <secret>`
+- **production 环境**: 如果 `HERMES_WEBHOOK_SECRET` 未配置，webhook 返回 403，拒绝所有请求
+- **development/test 环境**: secret 未配置时写 console.warn，接受所有请求
+- secret 不输出到日志
+- 绑定码使用：条件 UPDATE `WHERE status='pending'` + changes 检查，防止并发重复绑定
+
 ```
 1. 后端调 Hermes API 生成绑定二维码
 2. 用户微信扫码
