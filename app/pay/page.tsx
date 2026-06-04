@@ -1,12 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, Moon, CheckCircle2 } from 'lucide-react';
+import { Sparkles, CheckCircle2 } from 'lucide-react';
+import { PLANS } from '@/lib/plans';
 
-const PLANS = [
-  { id: 'monthly', name: '月光陪伴版', price: 29, tokens: '100k', amount_cents: 2900 },
-  { id: 'quarterly', name: '星球成长版', price: 99, tokens: '500k', amount_cents: 9900 },
-];
+const PAID_PLANS = Object.values(PLANS).filter((p) => p.amount_cents > 0);
 
 export default function PayPage() {
   const [qrImg, setQrImg] = useState<string | null>(null);
@@ -66,14 +64,14 @@ export default function PayPage() {
 
         {!orderId && !error && (
           <div className="space-y-4">
-            {PLANS.map((p) => (
+            {PAID_PLANS.map((p) => (
               <div key={p.id} className="bg-slate-900/60 border border-white/10 rounded-2xl p-5 flex justify-between items-center">
                 <div>
                   <h3 className="font-bold text-white">{p.name}</h3>
-                  <p className="text-xs text-slate-400">{p.tokens} tokens</p>
+                  <p className="text-xs text-slate-400">{(p.tokens_amount / 1000).toFixed(0)}k tokens</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-xl font-extrabold text-amber-300">¥{p.price}</p>
+                  <p className="text-xl font-extrabold text-amber-300">¥{(p.amount_cents / 100).toFixed(0)}</p>
                   <button
                     onClick={() => createOrder(p.id)}
                     disabled={creating}

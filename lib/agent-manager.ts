@@ -25,7 +25,7 @@ class LocalAgentManager implements AgentManager {
 
   async createUserAgent(userId: number): Promise<AgentResult> {
     const existing = await this.db.query(
-      "SELECT id FROM user_agents WHERE user_id = ? AND status IN ('pending', 'active') LIMIT 1",
+      "SELECT * FROM user_agents WHERE user_id = ? AND status IN ('pending', 'active') LIMIT 1",
       [userId],
     );
     if (existing.results.length > 0) {

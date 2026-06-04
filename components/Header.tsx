@@ -36,6 +36,7 @@ export default function Header({ onScrollTo }: HeaderProps) {
           </button>
         </nav>
         <div className="flex items-center gap-2">
+          <button onClick={async () => { await fetch('/api/auth/web-session', { method: 'POST' }); window.location.href = '/dashboard'; }} className="text-[10px] sm:text-xs text-amber-400 hover:text-amber-300 transition-colors cursor-pointer">开始体验</button>
           <a href="/pay" className="text-[10px] sm:text-xs text-slate-400 hover:text-amber-400 transition-colors cursor-pointer">充值</a>
           <a href="/bind"
             className="px-4 py-2 text-xs sm:text-sm font-semibold text-slate-950 bg-gradient-to-r from-[#fcd34d] to-amber-400 hover:from-amber-400 hover:to-amber-500 rounded-full transition-all duration-200 transform hover:scale-105 active:scale-95 shadow-md shadow-[#fcd34d]/20 flex items-center gap-1 cursor-pointer"
