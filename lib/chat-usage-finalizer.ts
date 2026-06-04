@@ -102,11 +102,20 @@ export async function finalizeChatUsage(
   );
   const remainingTokens = (users.results[0]?.token_balance as number) ?? 0;
 
-  await db.execute(
-    `UPDATE token_ledger SET balance_after = ?
-     WHERE source = 'deepseek' AND source_id = ? AND type = 'usage'`,
-    [remainingTokens, params.threadId],
-  );
+  try {
+    await db.execute(
+      `UPDATE token_ledger SET balance_after = ?
+       WHERE source = 'deepseek' AND source_id = ? AND type = 'usage'`,
+      [remainingTokens, params.threadId],
+    );
+  } catch (err) {
+    await logSystemEvent('chat.ledger_balance_update_failed', {
+      user_id: params.userId,
+      thread_id: params.threadId,
+      remaining_tokens: remainingTokens,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   return { status: 'ok', remainingTokens };
 }
