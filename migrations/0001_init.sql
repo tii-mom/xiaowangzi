@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id     INTEGER NOT NULL REFERENCES users(id),
     plan        TEXT NOT NULL
-                CHECK (plan IN ('free_trial', 'monthly', 'quarterly')),
+                CHECK (plan IN ('free_trial', 'monthly', 'quarterly', 'staging_test_10c')),
     status      TEXT NOT NULL DEFAULT 'active'
                 CHECK (status IN ('active', 'expired', 'cancelled')),
     started_at  TEXT NOT NULL DEFAULT (datetime('now')),
@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS payment_orders (
     order_id        TEXT NOT NULL UNIQUE,
     bufpay_aoid     TEXT,
     plan            TEXT NOT NULL
-                    CHECK (plan IN ('free_trial', 'monthly', 'quarterly')),
+                    CHECK (plan IN ('free_trial', 'monthly', 'quarterly', 'staging_test_10c')),
     tokens_amount   INTEGER NOT NULL,
     amount_cents    INTEGER NOT NULL,
     pay_type        TEXT,

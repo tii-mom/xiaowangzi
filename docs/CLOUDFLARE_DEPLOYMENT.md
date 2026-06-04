@@ -203,67 +203,18 @@ npm run cf:typegen
 
 ## Workers Runtime 兼容性
 
-### 未验证项汇总（PR-CF1.5 状态）
+### 未验证项汇总（PR-CF4c 状态）
 
 | 功能 | 状态 | 备注 |
 |------|------|------|
-| **HermesAgentManager** | ⏭️ 未验证 | Hermes 未验证，不可设置 `AGENT_BACKEND=hermes` |
-| **BufPay 端到端支付** | ⚠️ 部分验证 | 签名验证通过（见下方），订单创建需完整 auth session |
+| **HermesAgentManager** | ⏭️ 未验证 | Hermes 微信机器人仍未验证，不可设置 `AGENT_BACKEND=hermes` |
+| **BufPay 真实扫码支付**| ✅ 已验证 | 微信与支付宝真实扫码扣款已通过测试（见下方详情） |
 
-### Staging 验证结果（PR-CF1.5 — Cloudflare D1 + DeepSeek）
-
-> **验证日期**: 2026-06-04  
-> **D1 访问方式**: D1 REST Adapter（通过 CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_DATABASE_ID / CLOUDFLARE_API_TOKEN 环境变量），**未使用** wrangler `d1_databases` binding  
-> **Preview URL**: `http://localhost:8787` (Cloudflare workerd runtime)  
-> **说明**: 所有验证使用 **真实 D1 REST Adapter**（非 MockAdapter），数据直接查询 D1 确认。D1 Binding Adapter 留到 PR-CF2。
-
-| 功能 | 状态 | D1 验证 | 详情 |
-|------|------|---------|------|
-| API Routes (Route Handlers) | ✅ | N/A | `/api/health`、`/api/auth/web-session` 等 |
-| Cookie set/read | ✅ | N/A | `auth_token` cookie |
-| POST body JSON 解析 | ✅ | N/A | web-session、chat/send |
-| x-www-form-urlencoded body 解析 | ✅ | N/A | BufPay notify `URLSearchParams` 解析 |
-| BufPay MD5 签名验证 | ✅ | N/A | 正确签名通过，错误签名 400 拒绝 |
-| node:crypto / crypto.randomBytes | ✅ | N/A | `nodejs_compat` 已启用 |
-| **D1 REST Adapter** | ✅ | ✅ | 真实 D1 读写，users 表 2 条记录 |
-| **auth_sessions 创建** | ✅ | ✅ | 2 个 session 持久化到 D1 |
-| **token_ledger 写入 (grant)** | ✅ | ✅ | grant: +10000, source=free_trial |
-| **token_ledger 写入 (usage)** | ✅ | ✅ | usage: -598, balance_after=9402 |
-| **DeepSeek fetch** | ✅ | N/A | 真实 API 调用，小王子正常回复 |
-| **conversations 写入** | ✅ | ✅ | user + assistant 消息持久化 |
-| **Chat usage finalizer** | ✅ | ✅ | 598 tokens 正确扣减，balance: 10000→9402 |
-| **Admin overview** | ✅ | ✅ | users_count: 2 |
-| Payment finalizer | ⚠️ | N/A | 签名验证通过，订单创建需额外步骤 |
-| system_events 写入 | ⏭️ | 未测试 | 未触发系统事件 |
-
-### Remote Staging 验证结果（PR-CF3 — Cloudflare Workers 远端部署）
+### Staging 验证结果 (PR-CF4c — 真实扫码支付与技术闭环)
 
 > **验证日期**: 2026-06-04  
-> **远端 URL**: `https://xiaowangzi.348421501.workers.dev`  
+> **Staging URL**: `https://xiaowangzi.348421501.workers.dev`  
 > **D1 binding**: `DB` (xiaowangzi-staging, D1BindingAdapter)  
-> **说明**: Worker 部署到 Cloudflare 远端，使用 `wrangler deploy`。所有验证通过远端 URL 发起，数据写入远程 D1。
-
-| 功能 | 状态 | D1 确认 | 详情 |
-|------|------|---------|------|
-| **远端 Worker 部署** | ✅ | N/A | `wrangler deploy` 成功 |
-| GET /api/health | ✅ | N/A | `{"ok":true}` |
-| POST /api/auth/web-session | ✅ | ✅ | User 3/4 创建，session 持久化 |
-| GET /api/user/me | ✅ | N/A | id match |
-| GET /api/user/tokens | ✅ | ✅ | ledger 数据正确 |
-| GET /api/user/orders | ✅ | N/A | orders array |
-| GET /legal/privacy | ✅ | N/A | 200 |
-| GET /legal/terms | ✅ | N/A | 200 |
-| **POST /api/chat/send** | ✅ | ✅ | DeepSeek 真实回复, 516 tokens |
-| **token_ledger (grant)** | ✅ | ✅ | +10000, free_trial |
-| **token_ledger (usage)** | ✅ | ✅ | -516, balance=9484 |
-| **conversations 写入** | ✅ | ✅ | user + assistant 消息 |
-| GET /api/admin/overview | ✅ | ✅ | users_count: 4 |
-| BufPay x-www-form-urlencoded | ⚠️ | N/A | 本地验证通过，远端未单独测试 |
-
-#### 2. 已通过 (Staging Verification Passed) — 仅限创单与签名回调技术链路 (PR-CF4b)
-- **create-order Blocker 解除**: 在接口请求体中明确传入 `format: 'json'` 参数，BufPay 接口在成功配置收款二维码后，已能正确以 JSON 返回包含订单和付款二维码的数据，成功解除 HTML Cashier 页面阻断问题。
-- **返回订单支付数据**:
-  - `status`: `"ok"`
   - `aoid`: BufPay 内部订单号 (如 `21816bc872ba4819b65d4d214841386a`)
   - `pay_type`: `wechat` (或 `alipay`)
   - `price`: 订单实际价格 (支持金额微调, 如 `28.98` 或 `29.00`)

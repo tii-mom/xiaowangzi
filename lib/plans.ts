@@ -28,6 +28,13 @@ export const PLANS: Record<string, Plan> = {
     amount_cents: 9900,
     pay_type: 'wechat',
   },
+  staging_test_10c: {
+    id: 'staging_test_10c',
+    name: 'Staging Test 0.10',
+    tokens_amount: 100,
+    amount_cents: 10,
+    pay_type: 'wechat',
+  },
 };
 
 export function planIdToLabel(id: string): string {

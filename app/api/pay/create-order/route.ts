@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   let orderId: string | null = null;
 
   try {
-    const body = await req.json() as { plan?: string };
+    const body = await req.json() as { plan?: string; pay_type?: string };
     const planId = body.plan;
 
     if (!planId || !PLANS[planId]) {
@@ -25,7 +25,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const plan = PLANS[planId];
+    const appEnv = process.env.APP_ENV;
+    const deployEnv = process.env.DEPLOY_ENV;
+    const appUrl = process.env.APP_URL ?? '';
+    const isProduction = appEnv === 'production' || deployEnv === 'production' || appUrl.includes('wan.lat');
+
+    if (planId === 'staging_test_10c' && isProduction) {
+      return NextResponse.json(
+        { error: '生产环境禁止使用测试套餐' },
+        { status: 400 },
+      );
+    }
+
+    const plan = { ...PLANS[planId] };
+    if (body.pay_type && (body.pay_type === 'wechat' || body.pay_type === 'alipay')) {
+      if (!isProduction) {
+        plan.pay_type = body.pay_type;
+      }
+    }
     if (plan.amount_cents === 0) {
       return NextResponse.json(
         { error: '免费套餐无需支付，请直接绑定即可激活' },
