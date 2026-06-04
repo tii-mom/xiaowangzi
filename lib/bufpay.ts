@@ -116,18 +116,31 @@ export async function createBufPayOrder(
     throw new Error(`BufPay create-order HTTP ${res.status}: ${preview}`);
   }
 
-  let data: BufPayCreateResult & { info?: string };
-  try {
-    data = await res.json();
-  } catch (parseErr) {
-    throw new Error(`BufPay create-order JSON parse failed: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
+  const raw = await res.text();
+  const contentType = res.headers.get('content-type') ?? '';
+
+  let data: unknown;
+  if (contentType.includes('application/json') || raw.trim().startsWith('{')) {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      throw new Error(`BufPay create-order failed: invalid JSON response`);
+    }
+  } else {
+    const h2 = raw.match(/<h2[^>]*>(.*?)<\/h2>/i)?.[1];
+    const message = h2
+      ? h2.replace(/<[^>]+>/g, '').trim()
+      : raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+
+    throw new Error(`BufPay create-order failed: ${message || 'non-JSON response'}`);
   }
 
-  if (data.status === 'ok') {
-    return data;
+  const result = data as BufPayCreateResult & { info?: string };
+  if (result.status === 'ok') {
+    return result;
   }
 
-  throw new Error(`BufPay create-order failed: status=${data.status}, info=${data.info ?? '--'}`);
+  throw new Error(`BufPay create-order failed: status=${result.status}, info=${result.info ?? '--'}`);
 }
 
 export async function queryBufPayOrder(

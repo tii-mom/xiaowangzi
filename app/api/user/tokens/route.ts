@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     const db = getDb();
 
     const ledger = await db.query(
-      `SELECT type, delta_tokens, balance_after, source, total_tokens, model, created_at
+      `SELECT type, delta_tokens, balance_after, source, source_id, total_tokens, model, created_at
        FROM token_ledger WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`,
       [user.id],
     );
