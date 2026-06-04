@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Shield, Users, ShoppingCart, Coins, Activity } from 'lucide-react';
 
 interface Overview {
@@ -13,14 +13,11 @@ interface Overview {
 export default function AdminPage() {
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [token, setToken] = useState('');
-
-  useEffect(() => {
-    const saved = sessionStorage.getItem('admin_token');
-    if (saved) setToken(saved);
-    setLoading(false);
-  }, []);
+  const [loading, setLoading] = useState(false);
+  const [token, setToken] = useState(() => {
+    if (typeof window !== 'undefined') return sessionStorage.getItem('admin_token') || '';
+    return '';
+  });
 
   const fetchData = (adminToken: string) => {
     setLoading(true);
