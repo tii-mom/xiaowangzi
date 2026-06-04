@@ -50,15 +50,15 @@ export default function PaymentModal({ open, onClose, plan }: PaymentModalProps)
         body: JSON.stringify({ plan: plan.id }),
       });
 
-      const data = await res.json();
+      const data = await res.json() as Record<string, unknown>;
 
       if (!res.ok || data.error) {
-        throw new Error(data.error ?? '创建订单失败');
+        throw new Error(String(data.error ?? '创建订单失败'));
       }
 
-      setOrder(data);
+      setOrder(data as unknown as OrderResult);
       setStage('show-qr');
-      startPolling(data.order_id);
+      startPolling(String(data.order_id ?? ''));
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : '创建订单失败');
       setStage('error');
@@ -71,7 +71,7 @@ export default function PaymentModal({ open, onClose, plan }: PaymentModalProps)
     pollRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/pay/query?order_id=${orderId}`);
-        const data = await res.json();
+        const data = await res.json() as Record<string, unknown>;
 
         if (data.status === 'paid') {
           setStage('paid');

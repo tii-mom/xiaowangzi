@@ -23,10 +23,10 @@ export default function AdminPage() {
     setLoading(true);
     fetch('/api/admin/overview', {
       headers: { 'x-admin-token': adminToken },
-    }).then((r) => r.json()).then((d) => {
+    }).then((r) => r.json() as Promise<Overview & { error?: string }>).then((d) => {
       if (d.error) { setError(d.error); setData(null); }
       else { setData(d); setError(''); sessionStorage.setItem('admin_token', adminToken); }
-    }).catch((e) => setError(e.message)).finally(() => setLoading(false));
+    }).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e))).finally(() => setLoading(false));
   };
 
   const handleSubmit = (e: React.FormEvent) => {

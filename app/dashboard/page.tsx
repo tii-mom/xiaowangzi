@@ -23,20 +23,20 @@ export default function DashboardPage() {
     async function load() {
       const u = await fetch('/api/user/me');
       if (u.status === 401) { setNeedSession(true); setLoading(false); return; }
-      const uData = await u.json();
+      const uData = await u.json() as Record<string, unknown>;
       if (uData.error) { setNeedSession(true); setLoading(false); return; }
-      setUser(uData);
+      setUser(uData as unknown as UserInfo);
 
       const [t, o, s, c] = await Promise.all([
-        fetch('/api/user/tokens').then(r=>r.json()),
-        fetch('/api/user/orders').then(r=>r.json()),
-        fetch('/api/user/subscription').then(r=>r.json()),
-        fetch('/api/user/conversations?limit=5').then(r=>r.json()),
+        fetch('/api/user/tokens').then(r=>r.json() as Promise<Record<string, unknown>>),
+        fetch('/api/user/orders').then(r=>r.json() as Promise<Record<string, unknown>>),
+        fetch('/api/user/subscription').then(r=>r.json() as Promise<Record<string, unknown>>),
+        fetch('/api/user/conversations?limit=5').then(r=>r.json() as Promise<Record<string, unknown>>),
       ]);
-      setTokens(t.error ? null : t);
-      setOrders(o.orders ?? []);
-      setSub(s.subscription ?? null);
-      setConvs(c.conversations ?? []);
+      setTokens(t.error ? null : t as unknown as TokenData);
+      setOrders((o.orders ?? []) as unknown as Order[]);
+      setSub((s.subscription ?? null) as unknown as SubData | null);
+      setConvs((c.conversations ?? []) as unknown as ConvItem[]);
       setLoading(false);
     }
     load();

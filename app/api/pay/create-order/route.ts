@@ -15,7 +15,8 @@ export async function POST(req: NextRequest) {
   let orderId: string | null = null;
 
   try {
-    const { plan: planId } = await req.json();
+    const body = await req.json() as { plan?: string };
+    const planId = body.plan;
 
     if (!planId || !PLANS[planId]) {
       return NextResponse.json(

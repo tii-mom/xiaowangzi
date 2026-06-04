@@ -34,23 +34,24 @@ export default function ChatPanel({ onToast }: ChatPanelProps) {
   useEffect(() => {
     let cancelled = false;
     fetch('/api/chat/history?limit=20')
-      .then((res) => res.json())
+      .then((res) => res.json() as Promise<Record<string, unknown>>)
       .then((data) => {
         if (cancelled) return;
         if (data.messages && Array.isArray(data.messages)) {
+          const msgs = data.messages as unknown as Array<Record<string, unknown>>;
           const historyMsgs: Message[] = [];
-          for (let i = data.messages.length - 1; i >= 0; i--) {
-            const m = data.messages[i];
+          for (let i = msgs.length - 1; i >= 0; i--) {
+            const m = msgs[i];
             historyMsgs.push({
               id: `h-${i}`,
               sender: m.role === 'user' ? 'user' : 'prince',
-              text: m.content,
+              text: String(m.content ?? ''),
             });
           }
           setMessages(historyMsgs);
         }
         if (typeof data.token_balance === 'number') {
-          setTokenBalance(data.token_balance);
+          setTokenBalance(data.token_balance as number);
         }
       })
       .catch(() => {});
@@ -77,13 +78,13 @@ export default function ChatPanel({ onToast }: ChatPanelProps) {
           body: JSON.stringify({ message: textToSend }),
         });
 
-        const data = await res.json();
+        const data = await res.json() as Record<string, unknown>;
 
         if (data.error) {
           const princeMsgId = `p-${Date.now()}`;
           setMessages((prev) => [
             ...prev,
-            { id: princeMsgId, sender: 'prince', text: data.error },
+            { id: princeMsgId, sender: 'prince', text: String(data.error) },
           ]);
           if (res.status === 402) {
             onToast('💰 Token 余额不足，请充值后继续对话');
@@ -93,13 +94,13 @@ export default function ChatPanel({ onToast }: ChatPanelProps) {
         }
 
         if (data.remaining_tokens !== undefined) {
-          setTokenBalance(data.remaining_tokens);
+          setTokenBalance(Number(data.remaining_tokens));
         }
 
         const princeMsgId = `p-${Date.now()}`;
         setIsTyping(false);
 
-        const fullText = data.reply ?? '';
+        const fullText: string = String(data.reply ?? '');
         setMessages((prev) => [
           ...prev,
           { id: princeMsgId, sender: 'prince', text: '', isTyping: true },

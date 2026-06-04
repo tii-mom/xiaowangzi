@@ -94,19 +94,42 @@ Cloudflare Workers 配置文件，定义 Worker 名称、入口文件、资源�
 |------|------|
 | `HERMES_WEBHOOK_SECRET` | Hermes Webhook 签名密钥 |
 
-### D1 REST Adapter（PR-CF1 / PR-CF1.5 阶段）
+### D1 访问方式
 
-PR-CF1 和 PR-CF1.5 使用 D1 REST Adapter（`lib/db.ts`），通过环境变量访问 D1：
+项目支持两种 D1 访问方式，按优先级自动选择：
+
+| 优先级 | 方式 | 条件 | 文件 |
+|--------|------|------|------|
+| 1 | **D1BindingAdapter** | Workers runtime 有 D1 binding (`env.DB`) | `lib/d1-binding-adapter.ts` |
+| 2 | **D1RestAdapter** | 有 `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_DATABASE_ID` / `CLOUDFLARE_API_TOKEN` | `lib/db.ts` |
+| 3 | MockAdapter | 非生产环境兜底 | `lib/db.ts` |
+
+#### D1BindingAdapter（PR-CF2 新增）
+
+`wrangler.jsonc` 中添加 `d1_databases` binding：
+```jsonc
+{
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "xiaowangzi-staging",
+      "database_id": "83f12b1f-885e-4616-a7ff-4016dbdacef2"
+    }
+  ]
+}
+```
+
+Worker 运行时通过 `getCloudflareContext()` 的 `env.DB` 获取原生 D1 绑定。
+
+#### D1RestAdapter（PR-CF1 引入）
+
+通过环境变量访问 D1：
 
 | 变量 | 说明 |
 |------|------|
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 账户 ID |
 | `CLOUDFLARE_DATABASE_ID` | Cloudflare D1 数据库 ID |
-| `CLOUDFLARE_API_TOKEN` | Cloudflare API Token（有 D1 读/写权限） |
-
-> **注意**:
-> - PR-CF1.5 未在 `wrangler.jsonc` 中添加 `d1_databases` binding。
-> - D1 Binding Adapter（`wrangler.jsonc` 中的 `d1_databases` 绑定）留到 PR-CF2。
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API Token |
 
 ### 配置方式
 

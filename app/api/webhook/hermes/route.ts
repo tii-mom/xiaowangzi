@@ -40,11 +40,11 @@ export async function POST(req: NextRequest) {
       return new NextResponse('forbidden', { status: 403 });
     }
 
-    const body = await req.json().catch(() => ({}));
+    const body = await req.json().catch(() => ({})) as Record<string, unknown>;
     console.log('[webhook/hermes] received');
 
-    const message = body.message ?? body.text ?? body.content ?? '';
-    const hermesUserId = body.user_id ?? body.from_user ?? body.sender ?? '';
+    const message = String(body.message ?? body.text ?? body.content ?? '');
+    const hermesUserId = String(body.user_id ?? body.from_user ?? body.sender ?? '');
 
     if (!hermesUserId) {
       console.error('[webhook/hermes] missing user_id');
