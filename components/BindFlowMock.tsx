@@ -26,6 +26,7 @@ export default function BindFlowMock({ onToast, onAlert }: BindFlowMockProps) {
             </h3>
             <p className="text-xs sm:text-sm text-slate-400">
               扫一扫下方微信专属机器人二维码，即可在微信环境内完成永久陪伴绑定。
+              <span className="block mt-1 text-amber-500/70 text-[11px]">(POC 绑定演示 — 微信通道处于验证阶段)</span>
             </p>
           </div>
 
