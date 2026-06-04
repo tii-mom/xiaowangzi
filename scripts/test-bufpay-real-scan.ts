@@ -110,7 +110,7 @@ async function main() {
     console.log(`  ⚠️ 未获取到 Base64 图片，可直接使用支付链接进行测试。`);
   }
   if (qrUrl) {
-    console.log(`  👉 原始支付链接: ${qrUrl}`);
+    console.log(`  👉 二维码内容 / QR payload: ${qrUrl}`);
   }
 
   // ---- 4. 等待真实支付扫码 (轮询) ----
