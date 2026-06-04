@@ -21,7 +21,7 @@
     "NEXT_PUBLIC_APP_URL": "https://xiaowangzi.348421501.workers.dev",
     "BUFPAY_NOTIFY_URL": "https://xiaowangzi.348421501.workers.dev/api/pay/notify",
     "BUFPAY_RETURN_URL": "https://xiaowangzi.348421501.workers.dev/dashboard",
-    "BUFPAY_AMOUNT_TOLERANCE_CENTS": "0"
+    "BUFPAY_AMOUNT_TOLERANCE_CENTS": "10"
   },
   "d1_databases": [
     {

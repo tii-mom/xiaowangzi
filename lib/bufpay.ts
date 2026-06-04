@@ -96,6 +96,7 @@ export async function createBufPayOrder(
     notify_url: params.notify_url,
     return_url: params.return_url,
     feedback_url: params.feedback_url ?? '',
+    format: 'json',
     sign,
   });
 
