@@ -3,11 +3,10 @@
 import React from 'react';
 
 interface FooterProps {
-  onToast: (msg: string) => void;
   onAlert: (title: string, message: string) => void;
 }
 
-export default function Footer({ onToast, onAlert }: FooterProps) {
+export default function Footer({ onAlert }: FooterProps) {
   return (
     <footer className="z-10 border-t border-white/5 bg-slate-950 mt-12 py-10 px-4 text-center text-slate-500 space-y-4">
       <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
@@ -18,9 +17,9 @@ export default function Footer({ onToast, onAlert }: FooterProps) {
           </p>
         </div>
         <div className="flex flex-wrap gap-4 sm:gap-6 text-xs text-slate-400">
-          <button onClick={() => onToast("《用户服务协议》暂为原型占位协议")} className="hover:text-amber-300 underline cursor-pointer">用户协议</button>
-          <button onClick={() => onToast("《隐私数据保护守则》暂为原型占位隐私法")} className="hover:text-amber-300 underline cursor-pointer">隐私政策</button>
-          <button onClick={() => onToast("本品内容纯属人工智能生成角色演绎，请合理看待")} className="hover:text-amber-300 underline cursor-pointer">AI 内容说明</button>
+          <a href="/legal/terms" className="hover:text-amber-300 underline cursor-pointer">用户协议</a>
+          <a href="/legal/privacy" className="hover:text-amber-300 underline cursor-pointer">隐私政策</a>
+          <a href="/legal/privacy" className="hover:text-amber-300 underline cursor-pointer">AI 内容说明</a>
           <button onClick={() => onAlert("📫 寻求联合共赢", "如有产品公测合作意向或技术探讨，请邮件联系作者：yudeyou0118@gmail.com。随时相候！")} className="hover:text-amber-300 underline cursor-pointer">联系我们</button>
         </div>
       </div>
