@@ -260,35 +260,31 @@ npm run cf:typegen
 | GET /api/admin/overview | ✅ | ✅ | users_count: 4 |
 | BufPay x-www-form-urlencoded | ⚠️ | N/A | 本地验证通过，远端未单独测试 |
 
-> **说明**: 远端 staging 不等于生产上线。这是 Cloudflare Workers 的 POC staging 环境。  
-> **APP_URL / NEXT_PUBLIC_APP_URL**: staging 环境指向 `https://xiaowangzi.348421501.workers.dev`，配置在 `wrangler.jsonc` 的 `vars` 中。
+#### 2. 已通过 (Staging Verification Passed) — 仅限创单与签名回调技术链路 (PR-CF4b)
+- **create-order Blocker 解除**: 在接口请求体中明确传入 `format: 'json'` 参数，BufPay 接口在成功配置收款二维码后，已能正确以 JSON 返回包含订单和付款二维码的数据，成功解除 HTML Cashier 页面阻断问题。
+- **返回订单支付数据**:
+  - `status`: `"ok"`
+  - `aoid`: BufPay 内部订单号 (如 `21816bc872ba4819b65d4d214841386a`)
+  - `pay_type`: `wechat` (或 `alipay`)
+  - `price`: 订单实际价格 (支持金额微调, 如 `28.98` 或 `29.00`)
+  - `qr`: 支付二维码数据
+  - `expires_in`: 订单过期时间 (秒)
+  - `return_url`: 用户支付完成跳转页面
+- **Signed Notify 技术链路通过**:
+  - 成功验证：用户登录、获取真实订单、D1 确认为 pending、模拟签名 notify 触发、订单自动流转为 `paid`、`token_ledger` purchase 写入、用户余额 `token_balance` 增加、subscriptions active、防重幂等及安全边界检测。
+- **金额容差微调兼容说明**: 
+  - Staging 环境中 `BUFPAY_AMOUNT_TOLERANCE_CENTS` 设定为 `10`（10分）。
+  - **原因**: 个人免签收款在并发支付相同金额套餐时，BufPay 会通过微调几分钱金额（如 29.00 -> 28.98）来防止多用户支付占位冲突。
+  - **生产考量**: 此 10 分钱容差为 Staging 阶段技术闭环验证配置。在下一阶段 PR-CF5 中，生产环境的最终容差需要进一步明确，生产环境建议优先使用保守设置（如 0 或极小范围），除非 BufPay 实测回调确实需要微调容差。
+- **联调测试脚本**: `scripts/test-bufpay-staging.ts` 执行成功，退出码为 `0`。
+- **远端冒烟测试**: `scripts/test-e2e-smoke.ts` 验证通过，退出码为 `0`。
 
-### BufPay Staging 验证结果（PR-CF4a — notify/finalize 联调）
-
-> **验证日期**: 2026-06-04  
-> **远端 URL**: `https://xiaowangzi.348421501.workers.dev`  
-> **验证状态**: **PR-CF4a 子链路已通过**，**完整支付 E2E (PR-CF4b) 仍处于 Blocked 状态**。
-
-#### 1. 已验证通过 (Staging Verification Passed)
-- **BufPay notify x-www-form-urlencoded 解析**: 成功解析回调表单。
-- **MD5 正确签名验签**: 正确签名可以通过验签，订单转换为 `paid`。
-- **错误签名拒绝**: 签名错误返回 `400 sign error`。
-- **错误金额拒绝**: 回调金额与数据库不匹配时返回 `500 amount mismatch`（使用全新 pending 订单独立验证，不影响已支付订单）。
-- **订单状态自动流转**: `payment_orders` 状态从 `pending` -> `paid`。
-- **token_ledger purchase 写入**: 成功写入账本 `purchase` 记录，`delta_tokens` 额度匹配订单套餐。
-- **用户余额 token_balance 累加**: 用户余额按账本成功增加。
-- **订阅激活 (subscriptions)**: 成功写入 active 状态订阅记录，绑定 `monthly` 或 `quarterly` 计划。
-- **回调幂等性防重**: 重复回调返回 `200 ok`，但记账记录与用户余额不重复增加。
-
-#### 2. 未验证通过 / 待完成 (Pending E2E Verification)
-- **BufPay create-order 远端真实链路**: 尚未联通。
-- **用户真实支付入口与二维码展示**: 尚未验证。
-- **完整支付 E2E 闭环**: 尚未通过。
-
-#### 3. 当前 Blocker (商户配置阻塞)
-- **现象**: 调用 `/api/pay/create-order` 向 BufPay 创建订单时，BufPay API 响应 HTTP 200 的 HTML 报错页（页面含 `<h2>付款码不足，请上传不固定金额二维码</h2>`）。
-- **根因**: 商户账号在 BufPay 后台缺少对应套餐金额的付款码，或未上传“不固定金额”通用付款码。
-- **解决条件**: 商户需在 BufPay 后台上传对应金额的二维码或不固定金额二维码。
+#### 3. 未验证项 (Staging 局限说明 — 并不代表生产完全上线)
+- **用户真实扫码支付**: 尚未有人工进行真钱微信/支付宝扫码付；
+- **真实扣款链路**: 尚未进行微信/支付宝账户扣款测试；
+- **APP 到账检测**: 尚未通过手机端的 BufPay App 监听通知并发起真实到账 webhook notify；
+- **生产环境**: 生产域名 `wan.lat` 与生产 Secrets 配置；
+- **Hermes 微信机器人**: `HermesAgentManager` 核心对话控制流仍待后续单独验证。
 
 #### 4. 联调验证测试指令
 - **测试子链路（结算记账与幂等）**:
@@ -305,7 +301,12 @@ npm run cf:typegen
   BUFPAY_APP_SECRET=$BUFPAY_APP_SECRET \
   npx tsx scripts/test-bufpay-staging.ts
   ```
-  *(注: 此脚本尝试通过 API 创建真实订单，当前由于商户配置 blocker 预期失败 Exit 1)*
+  *(注: 此脚本尝试通过 API 创建真实订单，当前已通，预期成功 Exit 0)*
+
+> **说明**: 远端 staging 不等于生产上线。这是 Cloudflare Workers 的 POC staging 环境。  
+> **APP_URL / NEXT_PUBLIC_APP_URL**: staging 环境指向 `https://xiaowangzi.348421501.workers.dev`，配置在 `wrangler.jsonc` 的 `vars` 中。
+
+
 
 ### 已知限制
 
