@@ -2,5 +2,5 @@
   "name": "小王子- SoulMate",
   "description": "疗愈、陪伴、成长；小王子是具有记忆、情绪和成长能力的微信陪伴者机器人。帮助你进行微小的日常治愈、能量调频与晚间复盘成长。",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_DEEPSEEK_API"]
 }
