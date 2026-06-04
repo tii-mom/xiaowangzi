@@ -263,6 +263,26 @@ npm run cf:typegen
 > **说明**: 远端 staging 不等于生产上线。这是 Cloudflare Workers 的 POC staging 环境。  
 > **APP_URL / NEXT_PUBLIC_APP_URL**: staging 环境指向 `https://xiaowangzi.348421501.workers.dev`，配置在 `wrangler.jsonc` 的 `vars` 中。
 
+### BufPay Staging 验证结果（PR-CF4 — 支付联调）
+
+> **验证日期**: 2026-06-04  
+> **远端 URL**: `https://xiaowangzi.348421501.workers.dev`  
+
+| 测试项 | 状态 | 详情 |
+|--------|------|------|
+| BufPay notify x-www-form-urlencoded 解析 | ✅ | URLSearchParams 正常 |
+| BufPay MD5 签名验证（正确 sign） | ✅ | 验签通过，进入 finalizePaidOrder |
+| BufPay MD5 签名验证（错误 sign） | ✅ | 400 "sign error" |
+| payment_orders 状态转换 | ✅ | pending → processing → paid |
+| token_ledger purchase 写入 | ✅ | +10000 tokens, source=bufpay |
+| token_ledger 幂等（重复 notify） | ✅ | cnt=1，不重复写入 |
+| user token_balance 增加 | ✅ | 10000 → 20000 |
+| subscriptions 写入 | ✅ | plan=monthly, status=active |
+| 错误金额（amount mismatch） | ✅ | 500 "amount mismatch" |
+| BufPay create-order API 创建订单 | ⚠️ | BufPay API 返回 HTML，远端 Worker 无法创建真实订单 |
+
+> **已知问题**: BufPay `https://bufpay.com/api/pay/{aid}` 在 Cloudflare Workers 远端返回 HTML 页面而非 JSON。已通过 D1 直接创建 pending 订单 + 真实签名 notify 验证支付闭环的 notify/finalize 链路。create-order 链路待 BufPay 服务恢复后验证。
+
 ### 已知限制
 
 - Cloudflare Workers 不支持完整的 Node.js API。项目使用 `nodejs_compat` 兼容性标志。
