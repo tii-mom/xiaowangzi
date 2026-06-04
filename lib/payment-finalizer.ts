@@ -172,12 +172,26 @@ async function executeRecharge(
   const tokens = order.tokens_amount as number;
   const planId = order.plan as string;
 
-  const insertLedger = await db.execute(
-    `INSERT INTO token_ledger
-     (user_id, type, delta_tokens, balance_after, source, source_id, total_tokens, created_at)
-     VALUES (?, 'purchase', ?, 0, 'bufpay', ?, ?, datetime('now'))`,
-    [userId, tokens, orderId, tokens],
-  );
+  let insertLedger;
+  try {
+    insertLedger = await db.execute(
+      `INSERT INTO token_ledger
+       (user_id, type, delta_tokens, balance_after, source, source_id, total_tokens, created_at)
+       VALUES (?, 'purchase', ?, 0, 'bufpay', ?, ?, datetime('now'))`,
+      [userId, tokens, orderId, tokens],
+    );
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    const exists = await checkTokenLedger(db, orderId);
+    if (exists) {
+      await reconcileUserBalance(db, userId);
+      await ensureOrderPaid(db, orderId);
+      await logSystemEvent('payment.ledger_insert_duplicate', { order_id: orderId, error: errorMsg });
+      return { status: 'already_finalized' };
+    }
+    await logSystemEvent('payment.ledger_insert_failed', { order_id: orderId, error: errorMsg });
+    return { status: 'error', message: '账本写入失败' };
+  }
 
   if ((insertLedger.meta?.changes ?? 0) === 0) {
     await reconcileUserBalance(db, userId);
