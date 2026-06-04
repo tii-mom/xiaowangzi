@@ -260,7 +260,8 @@ npm run cf:typegen
 | GET /api/admin/overview | ✅ | ✅ | users_count: 4 |
 | BufPay x-www-form-urlencoded | ⚠️ | N/A | 本地验证通过，远端未单独测试 |
 
-> **说明**: 远端 staging 不等于生产上线。这是 Cloudflare Workers 的 POC staging 环境。
+> **说明**: 远端 staging 不等于生产上线。这是 Cloudflare Workers 的 POC staging 环境。  
+> **APP_URL / NEXT_PUBLIC_APP_URL**: staging 环境指向 `https://xiaowangzi.348421501.workers.dev`，配置在 `wrangler.jsonc` 的 `vars` 中。
 
 ### 已知限制
 
