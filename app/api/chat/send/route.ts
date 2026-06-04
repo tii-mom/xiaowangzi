@@ -10,6 +10,9 @@ const MAX_CONTEXT_MESSAGES = 20;
 const MIN_CHAT_TOKEN_BALANCE = parseInt(process.env.CHAT_MIN_TOKEN_BALANCE ?? '10000', 10);
 
 export async function POST(req: NextRequest) {
+  let userId: number | undefined;
+  let threadId: string | undefined;
+
   try {
     const { message } = await req.json();
     if (!message || typeof message !== 'string' || !message.trim()) {
@@ -19,6 +22,7 @@ export async function POST(req: NextRequest) {
     let user;
     try {
       user = await getPaymentUser(req);
+      userId = user.id;
     } catch (err) {
       if (err instanceof PaymentAuthError) {
         return NextResponse.json({ error: err.message }, { status: err.status });
@@ -29,13 +33,13 @@ export async function POST(req: NextRequest) {
     const db = getDb();
 
     if (user.token_balance <= MIN_CHAT_TOKEN_BALANCE) {
-      return NextResponse.json({
-        error: 'Token 余额不足，请充值后继续对话',
-        token_balance: user.token_balance,
-      }, { status: 402 });
+      return NextResponse.json(
+        { error: '这次小星球能量不足，请先充值后继续', token_balance: user.token_balance },
+        { status: 402 },
+      );
     }
 
-    const threadId = `chat_${user.id}_${Date.now().toString(36)}`;
+    threadId = `chat_${user.id}_${Date.now().toString(36)}`;
 
     const agentRows = await db.query(
       "SELECT id FROM user_agents WHERE user_id = ? AND status = 'active' LIMIT 1",
@@ -67,24 +71,6 @@ export async function POST(req: NextRequest) {
     const apiKey = requireEnv('DEEPSEEK_API_KEY');
     const result = await callDeepSeekChat(messages, apiKey);
 
-    await db.execute(
-      `INSERT INTO conversations
-       (user_id, thread_id, user_agent_id, role, content, model,
-        prompt_tokens, completion_tokens, total_tokens)
-       VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?)`,
-      [user.id, threadId, userAgentId ?? null, message, DEEPSEEK_MODEL,
-        result.usage.prompt_tokens, result.usage.completion_tokens, result.usage.total_tokens],
-    );
-
-    await db.execute(
-      `INSERT INTO conversations
-       (user_id, thread_id, user_agent_id, role, content, model,
-        prompt_tokens, completion_tokens, total_tokens)
-       VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?)`,
-      [user.id, threadId, userAgentId ?? null, result.content, DEEPSEEK_MODEL,
-        result.usage.prompt_tokens, result.usage.completion_tokens, result.usage.total_tokens],
-    );
-
     const usageResult = await finalizeChatUsage({
       userId: user.id,
       threadId,
@@ -94,22 +80,46 @@ export async function POST(req: NextRequest) {
       totalTokens: result.usage.total_tokens,
     });
 
-    if (usageResult.status === 'insufficient_tokens') {
-      return NextResponse.json({
-        reply: result.content,
-        warning: '此次对话已发送，但 Token 余额不足，请尽快充值',
-        usage: result.usage,
-        remaining_tokens: usageResult.remainingTokens ?? 0,
+    if (usageResult.status !== 'ok' && usageResult.status !== 'already_processed') {
+      await insertSystemEvent(db, 'chat.send_failed', {
+        user_id: user.id,
         thread_id: threadId,
+        reason: usageResult.status,
+        message: usageResult.message ?? '',
+        stage: 'finalize_usage',
       });
+
+      const status = usageResult.status === 'insufficient_tokens' ? 402 : 500;
+      return NextResponse.json(
+        { error: '这次小星球能量不足，请先充值后继续' },
+        { status },
+      );
     }
 
-    if (usageResult.status === 'error') {
-      return NextResponse.json({
-        reply: result.content,
-        usage: result.usage,
-        remaining_tokens: usageResult.remainingTokens ?? 0,
+    await db.execute(
+      `INSERT INTO conversations
+       (user_id, thread_id, user_agent_id, role, content, model,
+        prompt_tokens, completion_tokens, total_tokens)
+       VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?)`,
+      [user.id, threadId, userAgentId ?? null, message, DEEPSEEK_MODEL,
+        result.usage.prompt_tokens, result.usage.completion_tokens, result.usage.total_tokens],
+    );
+
+    try {
+      await db.execute(
+        `INSERT INTO conversations
+         (user_id, thread_id, user_agent_id, role, content, model,
+          prompt_tokens, completion_tokens, total_tokens)
+         VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?)`,
+        [user.id, threadId, userAgentId ?? null, result.content, DEEPSEEK_MODEL,
+          result.usage.prompt_tokens, result.usage.completion_tokens, result.usage.total_tokens],
+      );
+    } catch (err) {
+      await insertSystemEvent(db, 'chat.conversation_insert_failed', {
+        user_id: user.id,
         thread_id: threadId,
+        role: 'assistant',
+        error: err instanceof Error ? err.message : String(err),
       });
     }
 
@@ -121,9 +131,32 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error('[chat/send]', err);
+    const db = getDb();
+    await insertSystemEvent(db, 'chat.send_exception', {
+      user_id: userId ?? null,
+      thread_id: threadId ?? null,
+      error: err instanceof Error ? err.message : String(err),
+      stage: 'unknown',
+    }).catch(() => {});
+
     return NextResponse.json(
       { error: err instanceof Error ? err.message : '对话失败' },
       { status: 500 },
     );
+  }
+}
+
+async function insertSystemEvent(
+  db: ReturnType<typeof getDb>,
+  type: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await db.execute(
+      'INSERT INTO system_events (type, payload) VALUES (?, ?)',
+      [type, JSON.stringify(payload)],
+    );
+  } catch {
+    // best-effort
   }
 }

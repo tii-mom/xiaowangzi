@@ -11,7 +11,7 @@ export interface ChatUsageParams {
 }
 
 export interface ChatUsageResult {
-  status: 'ok' | 'insufficient_tokens' | 'error';
+  status: 'ok' | 'insufficient_tokens' | 'already_processed' | 'error';
   remainingTokens?: number;
   message?: string;
 }
@@ -27,6 +27,45 @@ export async function finalizeChatUsage(
       total_tokens: params.totalTokens,
     });
     return { status: 'error', message: 'usage must be > 0' };
+  }
+
+  const rows = await db.query(
+    "SELECT id FROM token_ledger WHERE source = 'deepseek' AND source_id = ? AND type = 'usage'",
+    [params.threadId],
+  );
+  if (rows.results.length > 0) {
+    return { status: 'already_processed' };
+  }
+
+  let insertLedger;
+  try {
+    insertLedger = await db.execute(
+      `INSERT INTO token_ledger
+       (user_id, type, delta_tokens, balance_after, source, source_id,
+        model, input_tokens, output_tokens, total_tokens, estimated_cost_cents, created_at)
+       VALUES (?, 'usage', ?, 0, 'deepseek', ?, ?, ?, ?, ?, 0, datetime('now'))`,
+      [params.userId, -params.totalTokens, params.threadId,
+        params.model, params.inputTokens, params.outputTokens, params.totalTokens],
+    );
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    const recheck = await db.query(
+      "SELECT id FROM token_ledger WHERE source = 'deepseek' AND source_id = ? AND type = 'usage'",
+      [params.threadId],
+    );
+    if (recheck.results.length > 0) {
+      return { status: 'already_processed' };
+    }
+    await logSystemEvent('chat.ledger_insert_failed', {
+      user_id: params.userId,
+      thread_id: params.threadId,
+      error: errorMsg,
+    });
+    return { status: 'error', message: '账本写入失败' };
+  }
+
+  if ((insertLedger.meta?.changes ?? 0) === 0) {
+    return { status: 'already_processed' };
   }
 
   const updateResult = await db.execute(
@@ -49,13 +88,15 @@ export async function finalizeChatUsage(
         user_id: params.userId,
         current_balance: currentBalance,
         required: params.totalTokens,
+        thread_id: params.threadId,
       });
       return { status: 'insufficient_tokens', remainingTokens: currentBalance };
     }
-    await logSystemEvent('chat.atomic_update_no_changes', {
+    await logSystemEvent('chat.atomic_update_failed', {
       user_id: params.userId,
       current_balance: currentBalance,
       required: params.totalTokens,
+      thread_id: params.threadId,
     });
     return { status: 'insufficient_tokens', remainingTokens: currentBalance };
   }
@@ -68,20 +109,16 @@ export async function finalizeChatUsage(
 
   try {
     await db.execute(
-      `INSERT INTO token_ledger
-       (user_id, type, delta_tokens, balance_after, source, source_id,
-        model, input_tokens, output_tokens, total_tokens, estimated_cost_cents, created_at)
-       VALUES (?, 'usage', ?, ?, 'deepseek', ?, ?, ?, ?, ?, 0, datetime('now'))`,
-      [params.userId, -params.totalTokens, remainingTokens, params.threadId,
-        params.model, params.inputTokens, params.outputTokens, params.totalTokens],
+      `UPDATE token_ledger SET balance_after = ?
+       WHERE source = 'deepseek' AND source_id = ? AND type = 'usage'`,
+      [remainingTokens, params.threadId],
     );
   } catch (err) {
-    await logSystemEvent('chat.token_ledger_insert_failed', {
+    await logSystemEvent('chat.ledger_balance_update_failed', {
       user_id: params.userId,
       thread_id: params.threadId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return { status: 'error', message: '账本写入失败，余额已扣除' };
   }
 
   return { status: 'ok', remainingTokens };
