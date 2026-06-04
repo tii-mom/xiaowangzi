@@ -5,7 +5,7 @@ import Toast from '@/components/Toast';
 import Modal from '@/components/Modal';
 import Header from '@/components/Header';
 import HeroSection from '@/components/HeroSection';
-import ChatSimulator from '@/components/ChatSimulator';
+import ChatPanel from '@/components/ChatPanel';
 import MorningCard from '@/components/MorningCard';
 import ActionCard from '@/components/ActionCard';
 import NightQuestions from '@/components/NightQuestions';
@@ -135,7 +135,7 @@ export default function Home() {
           id="section-hero"
         >
           <HeroSection onScrollTo={scrollToId} />
-          <ChatSimulator onToast={triggerToast} />
+          <ChatPanel onToast={triggerToast} />
         </section>
 
         <section className="space-y-8 py-2.5" id="section-experience">

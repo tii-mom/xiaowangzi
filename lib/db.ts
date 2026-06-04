@@ -110,53 +110,52 @@ class D1RestAdapter implements DatabaseAdapter {
 
 class MockAdapter implements DatabaseAdapter {
   private store: Map<string, Array<Record<string, unknown>>> = new Map();
-  private autoIncrements: Map<string, number> = new Map();
+  private nextId: Map<string, number> = new Map();
 
-  async query<T = DatabaseRow>(sql: string, _params: unknown[] = []): Promise<QueryResult<T>> {
+  async query<T = DatabaseRow>(sql: string, params: unknown[] = []): Promise<QueryResult<T>> {
     const upper = sql.trim().toUpperCase();
     const start = Date.now();
+    const table = this.getTable(sql);
 
     if (upper.startsWith('SELECT')) {
-      const tableMatch = sql.match(/FROM\s+(\w+)/i);
-      const table = tableMatch ? tableMatch[1].toLowerCase() : 'unknown';
-      const rows = (this.store.get(table) ?? []) as unknown as T[];
-      return { results: rows, success: true, meta: { duration: Date.now() - start } };
+      let rows = this.store.get(table) ?? [] as Array<Record<string, unknown>>;
+      const cntMatch = sql.match(/COUNT\(\*\)/i);
+      rows = this.applyWhereFilters(rows, sql, params);
+      if (cntMatch) {
+        return { results: [{ cnt: rows.length }] as unknown as T[], success: true, meta: { duration: Date.now() - start } };
+      }
+      return { results: rows as unknown as T[], success: true, meta: { duration: Date.now() - start } };
     }
 
     if (upper.startsWith('INSERT')) {
-      const tableMatch = sql.match(/INTO\s+(\w+)/i);
-      const table = tableMatch ? tableMatch[1].toLowerCase() : 'unknown';
-      const current = this.autoIncrements.get(table) ?? 0;
-      const nextId = current + 1;
-      this.autoIncrements.set(table, nextId);
-
-      const row: Record<string, unknown> = { id: nextId };
+      const id = this.getNextId(table);
+      const row = this.buildInsertRow(sql, id, params);
       const existing = this.store.get(table) ?? [];
       this.store.set(table, [...existing, row]);
-
-      return {
-        results: [row] as unknown as T[],
-        success: true,
-        meta: { duration: Date.now() - start, last_row_id: nextId, changes: 1 },
-      };
+      return { results: [row] as unknown as T[], success: true, meta: { duration: Date.now() - start, last_row_id: id, changes: 1 } };
     }
 
     if (upper.startsWith('UPDATE')) {
-      const tableMatch = sql.match(/UPDATE\s+(\w+)/i);
-      const table = tableMatch ? tableMatch[1].toLowerCase() : 'unknown';
-      return {
-        results: [] as unknown as T[],
-        success: true,
-        meta: { duration: Date.now() - start, changes: 0 },
-      };
+      let rows = this.store.get(table) ?? [];
+      const setPlaceholders = this.countSetPlaceholders(sql);
+      const whereParams = params.slice(setPlaceholders);
+      let targetRows = this.applyWhereFilters(rows, sql, whereParams);
+      const changes = targetRows.length > 0 ? 1 : 0;
+      if (changes > 0) {
+        this.applyUpdate(targetRows, sql, params);
+      }
+      return { results: [] as unknown as T[], success: true, meta: { duration: Date.now() - start, changes } };
     }
 
     if (upper.startsWith('DELETE')) {
-      return {
-        results: [] as unknown as T[],
-        success: true,
-        meta: { duration: Date.now() - start, changes: 0 },
-      };
+      let rows = this.store.get(table) ?? [];
+      const before = rows.length;
+      rows = this.applyWhereFilters(rows, sql, params);
+      const toRemove = new Set(rows);
+      const kept = (this.store.get(table) ?? []).filter((r) => !toRemove.has(r));
+      this.store.set(table, kept);
+      const changes = before - kept.length;
+      return { results: [] as unknown as T[], success: true, meta: { duration: Date.now() - start, changes } };
     }
 
     return { results: [] as unknown as T[], success: true, meta: { duration: Date.now() - start } };
@@ -176,6 +175,210 @@ class MockAdapter implements DatabaseAdapter {
     }
     return results;
   }
+
+  private getTable(sql: string): string {
+    const m = sql.match(/(?:INTO|FROM|UPDATE|DELETE\s+FROM)\s+(\w+)/i);
+    return m ? m[1].toLowerCase() : 'unknown';
+  }
+
+  private applyWhereFilters(
+    rows: Array<Record<string, unknown>>,
+    sql: string,
+    params: unknown[],
+  ): Array<Record<string, unknown>> {
+    const whereIdx = sql.toUpperCase().lastIndexOf('WHERE');
+    if (whereIdx < 0) return rows;
+    const whereClause = sql.slice(whereIdx + 5);
+    const conditions = this.splitWhereConditions(whereClause);
+    let paramIdx = 0;
+    for (const cond of conditions) {
+      const m = cond.match(/^\s*(\w+)\s*(=|>=)\s*(['"]?)([^'"]+?)\3\s*$/);
+      if (!m) continue;
+      const col = m[1].toLowerCase();
+      const op = m[2];
+      let val: unknown = m[4];
+      if (val === '?') {
+        if (paramIdx >= params.length) continue;
+        val = params[paramIdx++];
+      } else {
+        const parsed = parseInt(val as string, 10);
+        if (!Number.isNaN(parsed) && String(parsed) === val) val = parsed;
+      }
+      if (op === '=') {
+        rows = rows.filter((r) => r[col] === val);
+      } else if (op === '>=') {
+        rows = rows.filter((r) => (r[col] as number) >= (val as number));
+      }
+    }
+    return rows;
+  }
+
+  private splitWhereConditions(whereClause: string): string[] {
+    const parts: string[] = [];
+    let depth = 0;
+    let current = '';
+    let inQuote = false;
+    let quoteChar = '';
+    for (let i = 0; i < whereClause.length; i++) {
+      const ch = whereClause[i];
+      if (inQuote) { current += ch; if (ch === quoteChar) inQuote = false; }
+      else if (ch === '(') { depth++; current += ch; }
+      else if (ch === ')') { depth--; current += ch; }
+      else if (ch === "'" || ch === '"') { inQuote = true; quoteChar = ch; current += ch; }
+      else if (depth === 0 && whereClause.slice(i).toUpperCase().startsWith('AND')) {
+        parts.push(current.trim());
+        current = '';
+        i += 2;
+      } else { current += ch; }
+    }
+    if (current.trim()) parts.push(current.trim());
+    return parts.filter((p) => p.length > 0);
+  }
+
+  private parseWhere(sql: string, params: unknown[]): { col: string; val: unknown } | null {
+    const m = sql.match(/WHERE\s+(\w+)\s*=\s*(['"]?)([^'"\s;]+)\2/i);
+    if (!m) return null;
+    const col = m[1].toLowerCase();
+    let val: unknown = m[3];
+    if (val === '?') {
+      if (params.length === 0) return null;
+      val = params[0];
+    } else {
+      const parsed = parseInt(val as string, 10);
+      if (!Number.isNaN(parsed) && String(parsed) === val) val = parsed;
+    }
+    return { col, val };
+  }
+
+  private getNextId(table: string): number {
+    const v = (this.nextId.get(table) ?? 0) + 1;
+    this.nextId.set(table, v);
+    return v;
+  }
+
+  private buildInsertRow(sql: string, autoId: number, params: unknown[]): Record<string, unknown> {
+    const row: Record<string, unknown> = { id: autoId };
+    const colsMatch = sql.match(/\(([^)]+)\)/i);
+    if (!colsMatch) return row;
+    const cols = colsMatch[1].split(',').map((c) => c.trim().split(/\s+/)[0]);
+
+    const valuesStart = sql.indexOf('(', sql.lastIndexOf('VALUES')) + 1;
+    const valuesEnd = this.findClosingParen(sql, valuesStart);
+    const valuesRaw = sql.slice(valuesStart, valuesEnd);
+    const valueParts = this.splitValues(valuesRaw);
+
+    let paramIdx = 0;
+    for (let i = 0; i < cols.length && i < valueParts.length; i++) {
+      const colName = cols[i].toLowerCase();
+      const valPart = valueParts[i].trim();
+
+      if (valPart === '?') {
+        const v = params[paramIdx++];
+        if (colName === 'id' && v !== undefined && v !== null) {
+          row.id = typeof v === 'number' ? v : parseInt(String(v), 10);
+        } else if (v === null || v === undefined) {
+          row[colName] = null;
+        } else {
+          row[colName] = v;
+        }
+      } else {
+        const cleaned = valPart.replace(/^['"]/,'').replace(/['"]$/, '').replace(/^datetime\([^)]*\)$/, new Date().toISOString());
+        const parsed = parseInt(cleaned, 10);
+        if (colName === 'id' && !Number.isNaN(parsed)) {
+          row.id = parsed;
+        } else if (cleaned.toLowerCase() === 'null') {
+          row[colName] = null;
+        } else {
+          row[colName] = Number.isNaN(parsed) ? cleaned : parsed;
+        }
+      }
+    }
+    return row;
+  }
+
+  private findClosingParen(sql: string, start: number): number {
+    let depth = 0;
+    for (let i = start; i < sql.length; i++) {
+      if (sql[i] === '(') depth++;
+      else if (sql[i] === ')') {
+        if (depth === 0) return i;
+        depth--;
+      }
+    }
+    return sql.length;
+  }
+
+  private splitValues(raw: string): string[] {
+    const parts: string[] = [];
+    let depth = 0;
+    let current = '';
+    let inString = false;
+    let quoteChar = '';
+    for (let i = 0; i < raw.length; i++) {
+      const ch = raw[i];
+      if (inString) {
+        current += ch;
+        if (ch === quoteChar) inString = false;
+      } else if (ch === '(') {
+        depth++;
+        current += ch;
+      } else if (ch === ')') {
+        depth--;
+        current += ch;
+      } else if (ch === ',' && depth === 0) {
+        parts.push(current);
+        current = '';
+      } else if (ch === "'" || ch === '"') {
+        inString = true;
+        quoteChar = ch;
+        current += ch;
+      } else {
+        current += ch;
+      }
+    }
+    if (current.trim()) parts.push(current);
+    return parts;
+  }
+
+  private applyUpdate(rows: Array<Record<string, unknown>>, sql: string, params: unknown[]): void {
+    const setMatch = sql.match(/SET\s+([\s\S]+?)(?:\s+WHERE|$)/i);
+    if (!setMatch) return;
+    const setClauses = setMatch[1].split(',').map((s) => s.trim());
+    let paramIdx = 0;
+    for (const clause of setClauses) {
+      const eq = clause.split('=');
+      if (eq.length < 2) continue;
+      const col = eq[0].trim().toLowerCase();
+      let expr = eq.slice(1).join('=').trim();
+      if (expr.includes('?')) {
+        expr = expr.replace('?', String(params[paramIdx] ?? ''));
+        paramIdx++;
+      }
+      for (const row of rows) {
+        const current = (row[col] as number) ?? 0;
+        if (expr.includes('+')) {
+          row[col] = current + (parseInt(expr.replace(/[^0-9]/g, ''), 10) || 0);
+        } else if (expr.includes('-') && !expr.includes('now')) {
+          if (expr.trim().toLowerCase().startsWith(col)) {
+            const delta = parseInt(expr.replace(/[^0-9]/g, ''), 10) || 0;
+            row[col] = current - delta;
+          } else {
+            const v = parseInt(expr.replace(/[^0-9-]/g, ''), 10);
+            row[col] = Number.isNaN(v) ? expr : v;
+          }
+        } else {
+          const v = parseInt(expr.replace(/[^0-9-]/g, ''), 10);
+          row[col] = Number.isNaN(v) ? expr : v;
+        }
+      }
+    }
+  }
+
+  private countSetPlaceholders(sql: string): number {
+    const setMatch = sql.match(/SET\s+([\s\S]+?)(?:\s+WHERE|$)/i);
+    if (!setMatch) return 0;
+    return (setMatch[1].match(/\?/g) ?? []).length;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +397,6 @@ export function createDatabaseAdapter(): DatabaseAdapter {
 
   const hasD1Config = Boolean(accountId && databaseId && apiToken);
 
-  // Production 环境必须使用真实 D1
   if (nodeEnv === 'production') {
     if (!hasD1Config) {
       throw new Error(
@@ -205,12 +407,10 @@ export function createDatabaseAdapter(): DatabaseAdapter {
     return new D1RestAdapter(accountId!, databaseId!, apiToken!);
   }
 
-  // development / test 环境：优先 D1，降级 MockAdapter
   if (hasD1Config) {
     return new D1RestAdapter(accountId!, databaseId!, apiToken!);
   }
 
-  // 显式 mock 或开发环境无 D1 配置 → MockAdapter
   if (explicitMock || nodeEnv === 'development' || nodeEnv === 'test' || !nodeEnv) {
     console.warn(
       '[db] 使用 MockAdapter（数据仅存在于内存，重启丢失）。' +
