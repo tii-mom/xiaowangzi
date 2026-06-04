@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { getAgentManager } from '@/lib/agent-manager';
 
 function validateWebhookSecret(req: NextRequest): boolean {
   const nodeEnv = process.env.NODE_ENV ?? 'development';
@@ -96,15 +97,10 @@ export async function POST(req: NextRequest) {
           [hermesUserId, userId],
         );
 
-        const existingAgents = await db.query(
-          "SELECT id FROM user_agents WHERE user_id = ? AND status IN ('pending', 'active') LIMIT 1",
-          [userId],
-        );
-        if (existingAgents.results.length === 0) {
-          await db.execute(
-            "INSERT INTO user_agents (user_id, status) VALUES (?, 'pending')",
-            [userId],
-          );
+        try {
+          await getAgentManager().createUserAgent(userId);
+        } catch (agentErr) {
+          console.error('[webhook/hermes] agent creation failed:', agentErr);
         }
 
         await writeSystemEvent('bind.success', { user_id: userId, hermes_user_id: hermesUserId });

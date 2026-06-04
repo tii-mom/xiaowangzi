@@ -192,7 +192,7 @@ class MockAdapter implements DatabaseAdapter {
     const conditions = this.splitWhereConditions(whereClause);
     let paramIdx = 0;
     for (const cond of conditions) {
-      const m = cond.match(/^\s*(\w+)\s*(=|>=)\s*(['"]?)([^'"]+?)\3\s*$/);
+      const m = cond.match(/^\s*(\w+)\s*(=|>=)\s*(['"]?)([^'"]+?)\3/);
       if (!m) continue;
       const col = m[1].toLowerCase();
       const op = m[2];
