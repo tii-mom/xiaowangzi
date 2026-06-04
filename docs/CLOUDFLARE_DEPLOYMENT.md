@@ -260,8 +260,8 @@ npm run cf:typegen
 | GET /api/admin/overview | ✅ | ✅ | users_count: 4 |
 | BufPay x-www-form-urlencoded | ⚠️ | N/A | 本地验证通过，远端未单独测试 |
 
-#### 2. 已通过 (Staging Verification Passed) — 完整支付 E2E (PR-CF4b)
-- **create-order Blocker 解除**: 在接口请求体中明确传入 `format: 'json'` 参数，BufPay 接口在配置好付款二维码后能正确以 JSON 返回订单信息，消除了此前默认返回 HTML 的问题。
+#### 2. 已通过 (Staging Verification Passed) — 仅限创单与签名回调技术链路 (PR-CF4b)
+- **create-order Blocker 解除**: 在接口请求体中明确传入 `format: 'json'` 参数，BufPay 接口在成功配置收款二维码后，已能正确以 JSON 返回包含订单和付款二维码的数据，成功解除 HTML Cashier 页面阻断问题。
 - **返回订单支付数据**:
   - `status`: `"ok"`
   - `aoid`: BufPay 内部订单号 (如 `21816bc872ba4819b65d4d214841386a`)
@@ -270,15 +270,21 @@ npm run cf:typegen
   - `qr`: 支付二维码数据
   - `expires_in`: 订单过期时间 (秒)
   - `return_url`: 用户支付完成跳转页面
-- **完整 E2E 联调通过**:
-  - 用户登录、调用 `/api/pay/create-order` 获取真实订单和跳转数据、校验订单 ID、D1 确认为 pending 状态、传入真实 signature 发送 notify 回调、订单状态自动流转为 `paid`、账本写入与余额累加成功、订阅激活及防重幂等全面跑通。
-- **金额容差微调兼容**: 通过将 `BUFPAY_AMOUNT_TOLERANCE_CENTS` 设定为 `10`，成功兼容个人收款在并发支付时金额微调 1-2 分钱防占位的机制。
+- **Signed Notify 技术链路通过**:
+  - 成功验证：用户登录、获取真实订单、D1 确认为 pending、模拟签名 notify 触发、订单自动流转为 `paid`、`token_ledger` purchase 写入、用户余额 `token_balance` 增加、subscriptions active、防重幂等及安全边界检测。
+- **金额容差微调兼容说明**: 
+  - Staging 环境中 `BUFPAY_AMOUNT_TOLERANCE_CENTS` 设定为 `10`（10分）。
+  - **原因**: 个人免签收款在并发支付相同金额套餐时，BufPay 会通过微调几分钱金额（如 29.00 -> 28.98）来防止多用户支付占位冲突。
+  - **生产考量**: 此 10 分钱容差为 Staging 阶段技术闭环验证配置。在下一阶段 PR-CF5 中，生产环境的最终容差需要进一步明确，生产环境建议优先使用保守设置（如 0 或极小范围），除非 BufPay 实测回调确实需要微调容差。
 - **联调测试脚本**: `scripts/test-bufpay-staging.ts` 执行成功，退出码为 `0`。
 - **远端冒烟测试**: `scripts/test-e2e-smoke.ts` 验证通过，退出码为 `0`。
 
-#### 3. 未验证项
-- **生产环境 (Production Domain) 域名 wan.lat**: 尚未验证（留待下一阶段 PR-CF5）。
-- **微信/支付宝真实扣款测试**: 尚未进行真实线上小额测试。
+#### 3. 未验证项 (Staging 局限说明 — 并不代表生产完全上线)
+- **用户真实扫码支付**: 尚未有人工进行真钱微信/支付宝扫码付；
+- **真实扣款链路**: 尚未进行微信/支付宝账户扣款测试；
+- **APP 到账检测**: 尚未通过手机端的 BufPay App 监听通知并发起真实到账 webhook notify；
+- **生产环境**: 生产域名 `wan.lat` 与生产 Secrets 配置；
+- **Hermes 微信机器人**: `HermesAgentManager` 核心对话控制流仍待后续单独验证。
 
 #### 4. 联调验证测试指令
 - **测试子链路（结算记账与幂等）**:
