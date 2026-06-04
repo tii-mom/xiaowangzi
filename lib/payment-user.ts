@@ -10,11 +10,21 @@ export interface PaymentUser {
 export async function getPaymentUser(req: NextRequest): Promise<PaymentUser> {
   const nodeEnv = process.env.NODE_ENV ?? 'development';
   const isProd = nodeEnv === 'production';
+  const isDebug = process.env.INTERNAL_PAYMENT_DEBUG === 'true';
 
-  const existing = await dbQueryForUser(req);
+  const fromSession = await getBySession(req);
+  if (fromSession) return fromSession;
 
-  if (existing) {
-    return existing;
+  if (isProd && !isDebug) {
+    throw new PaymentAuthError(
+      '未登录或未绑定用户，请先完成绑定后再充值',
+      401,
+    );
+  }
+
+  if (!isProd || isDebug) {
+    const fromHeader = getByHeader(req);
+    if (fromHeader) return fromHeader;
   }
 
   if (isProd) {
@@ -42,40 +52,37 @@ export async function getPaymentUser(req: NextRequest): Promise<PaymentUser> {
   return { id: devId, token_balance: 0, status: 'active' };
 }
 
-async function dbQueryForUser(req: NextRequest): Promise<PaymentUser | null> {
+async function getBySession(req: NextRequest): Promise<PaymentUser | null> {
   const cookie = req.cookies.get('auth_token')?.value;
-  if (cookie) {
-    const sessions = await getDb().query(
-      'SELECT user_id FROM auth_sessions WHERE token = ? AND expires_at > datetime(\'now\')',
-      [cookie],
-    );
-    if (sessions.results.length > 0) {
-      const userId = sessions.results[0].user_id as number;
-      const users = await getDb().query(
-        'SELECT id, token_balance, status FROM users WHERE id = ?',
-        [userId],
-      );
-      if (users.results.length > 0) {
-        return users.results[0] as unknown as PaymentUser;
-      }
-    }
-  }
+  if (!cookie) return null;
 
+  const sessions = await getDb().query(
+    'SELECT user_id FROM auth_sessions WHERE token = ? AND expires_at > datetime(\'now\')',
+    [cookie],
+  );
+  if (sessions.results.length === 0) return null;
+
+  const userId = sessions.results[0].user_id as number;
+  const users = await getDb().query(
+    'SELECT id, token_balance, status FROM users WHERE id = ?',
+    [userId],
+  );
+  if (users.results.length === 0) return null;
+
+  return users.results[0] as unknown as PaymentUser;
+}
+
+function getByHeader(req: NextRequest): PaymentUser | null {
   const headerUserId = req.headers.get('x-user-id');
-  if (headerUserId && headerUserId !== 'demo-user') {
-    const id = Number(headerUserId);
-    if (!Number.isNaN(id) && id > 0) {
-      const users = await getDb().query(
-        'SELECT id, token_balance, status FROM users WHERE id = ?',
-        [id],
-      );
-      if (users.results.length > 0) {
-        return users.results[0] as unknown as PaymentUser;
-      }
-    }
-  }
+  if (!headerUserId || headerUserId === 'demo-user') return null;
 
-  return null;
+  const id = Number(headerUserId);
+  if (Number.isNaN(id) || id <= 0) return null;
+
+  throw new PaymentAuthError(
+    'x-user-id header is only allowed in development/test or with INTERNAL_PAYMENT_DEBUG=true',
+    401,
+  );
 }
 
 export class PaymentAuthError extends Error {

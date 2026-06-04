@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { queryBufPayOrder } from '@/lib/bufpay';
 import { finalizePaidOrder } from '@/lib/payment-finalizer';
+import { centsToPriceYuan } from '@/lib/plans';
 
 export async function GET(req: NextRequest) {
   try {
@@ -55,12 +56,13 @@ export async function GET(req: NextRequest) {
         const bufpayResult = await queryBufPayOrder(effectiveAoid);
 
         if (bufpayResult.status === 'success' || bufpayResult.status === 'payed') {
+          const priceYuan = centsToPriceYuan(Number(order.amount_cents));
           const finalizeResult = await finalizePaidOrder({
             order_id: (order.order_id as string) ?? '',
             aoid: effectiveAoid,
             order_uid: String(order.user_id),
-            price: String(order.amount_cents ?? '0'),
-            pay_price: String(order.amount_cents ?? '0'),
+            price: priceYuan,
+            pay_price: priceYuan,
           });
 
           if (finalizeResult.status === 'ok' || finalizeResult.status === 'already_finalized') {

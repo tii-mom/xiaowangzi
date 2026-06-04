@@ -63,48 +63,104 @@ export async function finalizePaidOrder(params: FinalizeParams): Promise<Finaliz
     return { status: 'error', message: 'aoid mismatch' };
   }
 
-  const updateResult = await db.execute(
-    `UPDATE payment_orders
-     SET status = 'paid', paid_at = datetime('now'), bufpay_aoid = COALESCE(bufpay_aoid, ?),
-         raw_notify_json = ?
-     WHERE order_id = ? AND status = 'pending'`,
-    [params.aoid, params.raw_notify_json ?? JSON.stringify(params), params.order_id],
+  const hasLedger = await checkTokenLedger(db, params.order_id);
+  const currentStatus = order.status as string;
+
+  if (hasLedger) {
+    return { status: 'already_finalized' };
+  }
+
+  if (currentStatus === 'paid' && !hasLedger) {
+    await logSystemEvent('payment.paid_without_ledger_recovery', {
+      order_id: params.order_id,
+    });
+  }
+
+  const isRecovery = currentStatus === 'paid' || currentStatus === 'processing';
+
+  if (!isRecovery && currentStatus !== 'pending') {
+    await logSystemEvent('payment.unexpected_status', {
+      order_id: params.order_id,
+      status: currentStatus,
+    });
+    return { status: 'error', message: `unexpected order status: ${currentStatus}` };
+  }
+
+  if (!isRecovery) {
+    const claimResult = await db.execute(
+      `UPDATE payment_orders
+       SET status = 'processing', bufpay_aoid = COALESCE(bufpay_aoid, ?),
+           raw_notify_json = ?
+       WHERE order_id = ? AND status = 'pending'`,
+      [params.aoid, params.raw_notify_json ?? JSON.stringify(params), params.order_id],
+    );
+
+    if ((claimResult.meta?.changes ?? 0) === 0) {
+      const hasLedgerNow = await checkTokenLedger(db, params.order_id);
+      if (hasLedgerNow) {
+        return { status: 'already_finalized' };
+      }
+      await logSystemEvent('payment.finalize_race', {
+        order_id: params.order_id,
+      });
+      return { status: 'error', message: 'concurrent update conflict' };
+    }
+  }
+
+  return executeRecharge(db, order, params.order_id, params.aoid);
+}
+
+async function checkTokenLedger(db: ReturnType<typeof getDb>, orderId: string): Promise<boolean> {
+  const rows = await db.query(
+    "SELECT id FROM token_ledger WHERE source = 'bufpay' AND source_id = ? AND type = 'purchase'",
+    [orderId],
+  );
+  return rows.results.length > 0;
+}
+
+async function executeRecharge(
+  db: ReturnType<typeof getDb>,
+  order: Record<string, unknown>,
+  orderId: string,
+  aoid: string,
+): Promise<FinalizeResult> {
+  const userId = order.user_id as number;
+  const tokens = order.tokens_amount as number;
+  const planId = order.plan as string;
+
+  const users = await db.query(
+    'SELECT token_balance FROM users WHERE id = ?',
+    [userId],
+  );
+  const currentBalance = (users.results[0]?.token_balance as number) ?? 0;
+  const newBalance = currentBalance + tokens;
+
+  const insertLedger = await db.execute(
+    `INSERT INTO token_ledger
+     (user_id, type, delta_tokens, balance_after, source, source_id, total_tokens, created_at)
+     VALUES (?, 'purchase', ?, ?, 'bufpay', ?, ?, datetime('now'))`,
+    [userId, tokens, newBalance, orderId, tokens],
   );
 
-  if ((updateResult.meta?.changes ?? 0) === 0) {
-    const recheck = await db.query(
-      "SELECT status FROM payment_orders WHERE order_id = ?",
-      [params.order_id],
-    );
-    const currentStatus = recheck.results[0]?.status as string | undefined;
-    if (currentStatus === 'paid') {
-      return { status: 'already_finalized' };
-    }
-    await logSystemEvent('payment.finalize_race', {
-      order_id: params.order_id,
-      current_status: currentStatus ?? 'unknown',
-    });
-    return { status: 'error', message: 'concurrent update conflict' };
+  if ((insertLedger.meta?.changes ?? 0) === 0) {
+    await logSystemEvent('payment.ledger_insert_duplicate', { order_id: orderId });
+    return { status: 'already_finalized' };
   }
 
   try {
-    const userId = order.user_id as number;
-    const tokens = order.tokens_amount as number;
-
     await db.execute(
-      'UPDATE users SET token_balance = token_balance + ?, updated_at = datetime(\'now\') WHERE id = ?',
-      [tokens, userId],
+      'UPDATE users SET token_balance = ?, updated_at = datetime(\'now\') WHERE id = ?',
+      [newBalance, userId],
     );
+  } catch (err) {
+    await logSystemEvent('payment.balance_update_failed', {
+      order_id: orderId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { status: 'error', message: '余额更新失败，token_ledger 已写入，请人工处理' };
+  }
 
-    await db.execute(
-      `INSERT INTO token_ledger
-       (user_id, type, delta_tokens, balance_after, source, source_id, total_tokens, created_at)
-       SELECT ?, 'purchase', ?, token_balance, 'bufpay', ?, ?, datetime('now')
-       FROM users WHERE id = ?`,
-      [userId, tokens, params.order_id, tokens, userId],
-    );
-
-    const planId = order.plan as string;
+  try {
     const existingSub = await db.query(
       "SELECT id FROM subscriptions WHERE user_id = ? AND status = 'active' AND plan = ?",
       [userId, planId],
@@ -122,16 +178,24 @@ export async function finalizePaidOrder(params: FinalizeParams): Promise<Finaliz
         [existingSub.results[0].id],
       );
     }
-
-    return { status: 'ok' };
-
   } catch (err) {
-    await logSystemEvent('payment.finalize_crash', {
-      order_id: params.order_id,
+    await logSystemEvent('payment.subscription_update_failed', {
+      order_id: orderId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return { status: 'error', message: '入账过程异常' };
   }
+
+  await db.execute(
+    'UPDATE payment_orders SET status = ?, paid_at = datetime(\'now\') WHERE order_id = ? AND status = ?',
+    ['paid', orderId, 'processing'],
+  );
+
+  const recoverySetPaid = await db.execute(
+    "UPDATE payment_orders SET status = 'paid', paid_at = datetime('now') WHERE order_id = ? AND status = 'paid'",
+    [orderId],
+  );
+
+  return { status: 'ok' };
 }
 
 function parseEnvTolerance(): number {
