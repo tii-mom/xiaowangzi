@@ -167,6 +167,17 @@ npm run cf:typegen
 
 ## Workers Runtime 兼容性
 
+### 未验证项汇总（PR-CF1 状态）
+
+下列功能因缺少环境变量或凭据，在 Cloudflare Preview 中**尚未验证**：
+
+| 功能 | 缺少的配置 | 影响 |
+|------|-----------|------|
+| **D1 REST Adapter** | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_DATABASE_ID`, `CLOUDFLARE_API_TOKEN` | 无法使用真实 D1，仅 MockAdapter |
+| **DeepSeek fetch** | `DEEPSEEK_API_KEY` 未在 worker env 设置 | 无法测试 `/api/chat/send` |
+| **BufPay notify** | 支付 env / 回调地址未配置 | 无法测试支付入账全链路 |
+| **HermesAgentManager** | Hermes 未经验证 | 不可设置 `AGENT_BACKEND=hermes` |
+
 ### 已验证（PR-CF1 首次验证）
 
 | 功能 | 状态 | 备注 |
@@ -200,13 +211,15 @@ npm run cf:typegen
 本地 preview 需要的环境变量通过 `.dev.vars` 提供（不入库）。最少配置：
 
 ```
-NODE_ENV=development
+APP_ENV=preview
 DATABASE_ADAPTER=mock
 SESSION_SECRET=dev-secret
 CHAT_MIN_TOKEN_BALANCE=10000
 ```
 
-如需测试真实 D1：
+> **关键**: `APP_ENV=preview` 用于标记非生产环境。Cloudflare Preview 中 Next.js 构建强制 `NODE_ENV=production`，需要通过 `APP_ENV=preview` 明确告知 `lib/db.ts`：这不是真实生产环境，允许使用 MockAdapter。
+
+如需测试真实 D1（需要完整 D1 凭据）：
 ```
 CLOUDFLARE_ACCOUNT_ID=xxx
 CLOUDFLARE_DATABASE_ID=xxx
@@ -214,6 +227,34 @@ CLOUDFLARE_API_TOKEN=xxx
 ```
 
 > **注意**: `.dev.vars` 已加入 `.gitignore`，不要提交真实密钥。
+
+---
+
+## 数据库适配器生产门禁
+
+`lib/db.ts` 的 `createDatabaseAdapter()` 有严格的生产环境门禁：
+
+### 生产信号（任意一项命中代表非本地/CI）
+
+| 信号 | 来源 |
+|------|------|
+| `NODE_ENV=production` | Next.js 构建设置 |
+| `APP_ENV=production` | 显式生产标记 |
+| `DEPLOY_ENV=production` | 部署环境标记 |
+| `APP_URL` 包含 `wan.lat` | 生产域名 |
+| `NEXT_PUBLIC_APP_URL` 包含 `wan.lat` | 生产域名 |
+
+### MockAdapter 规则
+
+| 场景 | 结果 |
+|------|------|
+| 生产信号 + `DATABASE_ADAPTER=mock` | ❌ 抛出错误: "Mock database adapter is not allowed in production" |
+| 生产信号 + `APP_ENV=preview` + `DATABASE_ADAPTER=mock` | ✅ MockAdapter（preview 模式） |
+| 非生产环境 + `DATABASE_ADAPTER=mock` | ✅ MockAdapter |
+| 生产信号 + D1 凭据完整 | ✅ D1RestAdapter |
+| 生产信号 + 无 D1 凭据 | ❌ 抛出错误 |
+
+> **硬规则**: 真实生产环境**永远不允许**使用 MockAdapter，不会静默降级。
 
 ---
 

@@ -389,44 +389,65 @@ let _db: DatabaseAdapter | null = null;
 
 export function createDatabaseAdapter(): DatabaseAdapter {
   const nodeEnv = process.env.NODE_ENV;
+  const appEnv = process.env.APP_ENV;
   const explicitMock = process.env.DATABASE_ADAPTER === 'mock';
 
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const databaseId = process.env.CLOUDFLARE_DATABASE_ID;
   const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-
   const hasD1Config = Boolean(accountId && databaseId && apiToken);
 
+  // Production signals — 任何一项命中都代表非本地/CI 环境
+  const isProductionNodeEnv = nodeEnv === 'production';
+  const isProductionAppEnv = appEnv === 'production';
+  const isProductionDeployEnv = process.env.DEPLOY_ENV === 'production';
+  const isWanLatUrl =
+    (process.env.APP_URL ?? '').includes('wan.lat') ||
+    (process.env.NEXT_PUBLIC_APP_URL ?? '').includes('wan.lat');
+
+  const hasProductionSignal =
+    isProductionNodeEnv || isProductionAppEnv || isProductionDeployEnv || isWanLatUrl;
+
+  // APP_ENV=preview 允许在 Cloudflare Preview 等场景使用 MockAdapter
+  const isPreview = appEnv === 'preview';
+  const isProduction = hasProductionSignal && !isPreview;
+
+  // 1. 生产环境 + 显式 mock → 硬拒绝
+  if (explicitMock && isProduction) {
+    throw new Error(
+      '[db] Mock database adapter is not allowed in production. ' +
+      'Remove DATABASE_ADAPTER=mock and configure CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_DATABASE_ID, CLOUDFLARE_API_TOKEN.'
+    );
+  }
+
+  // 2. 非生产环境显式 mock → 允许（POC / preview / dev / CI）
   if (explicitMock) {
     console.warn(
       '[db] 使用 MockAdapter（DATABASE_ADAPTER=mock，数据仅存在于内存，重启丢失）。' +
-      '如需连接真实 D1，请取消设置 DATABASE_ADAPTER 并提供 CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_DATABASE_ID / CLOUDFLARE_API_TOKEN。'
+      '如需连接真实 D1，请取消设置 DATABASE_ADAPTER 并提供 D1 凭据。'
     );
     return new MockAdapter();
   }
 
+  // 3. D1 凭据完整 → 使用 D1 REST Adapter
   if (hasD1Config) {
     return new D1RestAdapter(accountId!, databaseId!, apiToken!);
   }
 
-  if (nodeEnv === 'production') {
+  // 4. 生产环境无 D1 → 拒绝
+  if (isProduction) {
     throw new Error(
       '[db] Production 环境禁止使用 MockAdapter。' +
       '请设置 CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_DATABASE_ID, CLOUDFLARE_API_TOKEN。'
     );
   }
 
-  if (nodeEnv === 'development' || nodeEnv === 'test' || !nodeEnv) {
-    console.warn(
-      '[db] 使用 MockAdapter（数据仅存在于内存，重启丢失）。' +
-      '如需连接真实 D1，请设置 CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_DATABASE_ID / CLOUDFLARE_API_TOKEN。'
-    );
-    return new MockAdapter();
-  }
-
-  throw new Error(
-    `[db] 无法创建 DatabaseAdapter。NODE_ENV=${nodeEnv}, DATABASE_ADAPTER=${process.env.DATABASE_ADAPTER}`
+  // 5. 非生产环境无 D1 → MockAdapter 兜底
+  console.warn(
+    '[db] 使用 MockAdapter（数据仅存在于内存，重启丢失）。' +
+    '如需连接真实 D1，请设置 D1 凭据。'
   );
+  return new MockAdapter();
 }
 
 export function getDb(): DatabaseAdapter {
