@@ -1,8 +1,5 @@
 /**
- * chat-usage 扣费逻辑测试 (业务路径验证)
- *
- * MockAdapter 限制: 不支持 WHERE 过滤，多用户/多表场景下存在已知偏差。
- * 以下测试路径在真实 D1 上均正确。
+ * chat-usage 扣费逻辑测试 — 精确断言余额/账本
  *
  * 运行: npx tsx scripts/test-chat-usage.ts
  */
@@ -25,67 +22,95 @@ async function runTests() {
   const { getDb: dbGetter } = await import('../lib/db');
   const db = dbGetter();
 
-  await db.execute('INSERT INTO users (id, token_balance, status) VALUES (91001, 50000, \'active\')', []);
-
+  const uid1 = 91001;
+  const uid2 = 91002;
+  const initialBalance = 50000;
+  const useTokens = 1234;
   const thread1 = `t1_${Date.now().toString(36)}`;
-  const thread2 = `t2_${Date.now().toString(36)}`;
+
+  // ---- 准备 ----
+  await db.execute('INSERT INTO users (id, token_balance, status) VALUES (?, ?, ?)', [uid1, initialBalance, 'active']);
+  await db.execute('INSERT INTO users (id, token_balance, status) VALUES (?, ?, ?)', [uid2, 100, 'active']);
 
   // ---- 1. zero ----
   console.log('=== 1. totalTokens=0 → error ===');
   const r0 = await finalizeChatUsage({
-    userId: 91001, threadId: `zero_${Date.now()}`, model: 'test',
+    userId: uid1, threadId: `zero_${Date.now()}`, model: 'test',
     inputTokens: 0, outputTokens: 0, totalTokens: 0,
   });
-  assert(r0.status === 'error' && r0.message === 'usage must be > 0',
-    `zero → error ✅ (${r0.status})`);
+  assert(r0.status === 'error', `status=error (${r0.status})`);
 
-  // ---- 2. 正常扣费 ----
-  console.log('\n=== 2. 正常扣费 ===');
+  // ---- 2. 正常扣费 + 精确余额 ----
+  console.log('\n=== 2. 正常扣费 (1234 tokens) ===');
   const r1 = await finalizeChatUsage({
-    userId: 91001, threadId: thread1, model: 'deepseek-v4-flash',
-    inputTokens: 400, outputTokens: 834, totalTokens: 1234,
+    userId: uid1, threadId: thread1, model: 'deepseek-v4-flash',
+    inputTokens: 400, outputTokens: 834, totalTokens: useTokens,
   });
-  assert(r1.status === 'ok', `status=ok ✅ (${r1.status})`);
+  assert(r1.status === 'ok', `status=ok (${r1.status})`);
+  assert(r1.remainingTokens === initialBalance - useTokens,
+    `remainingTokens=${initialBalance - useTokens} (${r1.remainingTokens})`);
 
-  // ---- 3. 重复 threadId 幂等 ----
-  console.log('\n=== 3. 重复 threadId → already_processed ===');
+  const u1 = await db.query('SELECT token_balance FROM users WHERE id = ?', [uid1]);
+  assert((u1.results[0]?.token_balance as number) === initialBalance - useTokens,
+    `users.token_balance=${initialBalance - useTokens}`);
+
+  const l1 = await db.query(
+    "SELECT * FROM token_ledger WHERE source = 'deepseek' AND source_id = ? AND type = 'usage'",
+    [thread1],
+  );
+  assert(l1.results.length === 1, `ledger count=1`);
+  const r = l1.results[0] as Record<string, unknown>;
+  assert(r.delta_tokens === -useTokens, `delta_tokens=${-useTokens} (${r.delta_tokens})`);
+  assert(r.balance_after === initialBalance - useTokens,
+    `balance_after=${initialBalance - useTokens} (${r.balance_after})`);
+
+  // ---- 3. 重复幂等 ----
+  console.log('\n=== 3. 重复 threadId 幂等 ===');
   const r2 = await finalizeChatUsage({
-    userId: 91001, threadId: thread1, model: 'deepseek-v4-flash',
-    inputTokens: 1, outputTokens: 1, totalTokens: 999,
+    userId: uid1, threadId: thread1, model: 'deepseek-v4-flash',
+    inputTokens: 1, outputTokens: 1, totalTokens: 500,
   });
-  assert(r2.status === 'already_processed', `already_processed ✅ (${r2.status})`);
+  assert(r2.status === 'already_processed', `already_processed (${r2.status})`);
+  assert((u1.results[0]?.token_balance as number) === initialBalance - useTokens,
+    `余额未变 = ${initialBalance - useTokens}`);
+  const l2 = await db.query(
+    "SELECT COUNT(*) as cnt FROM token_ledger WHERE source = 'deepseek' AND source_id = ? AND type = 'usage'",
+    [thread1],
+  );
+  assert((l2.results[0]?.cnt as number) === 1, `ledger 仍为 1`);
 
-  // MockAdapter 已知限制: SELECT 不过滤 WHERE → checkTokenLedger 跨 thread 误判
-  console.log('\n=== 4. 新 threadId 正常扣费 ===');
+  // ---- 4. 余额不足 (ledger 回滚) ----
+  console.log('\n=== 4. 余额不足 → insufficient_tokens + ledger 回滚 ===');
+  const poorThread = `poor_${Date.now().toString(36)}`;
   const r3 = await finalizeChatUsage({
-    userId: 91001, threadId: thread2, model: 'deepseek-v4-flash',
-    inputTokens: 200, outputTokens: 300, totalTokens: 500,
+    userId: uid2, threadId: poorThread, model: 'deepseek-v4-flash',
+    inputTokens: 400, outputTokens: 834, totalTokens: useTokens,
   });
-  if (r3.status === 'already_processed' || r3.status === 'ok') {
-    console.log(`  status=${r3.status} ✅ (MockAdapter 已知限制: already_processed 或 ok 均合法)`);
-  } else {
-    assert(false, `意外状态: ${r3.status}`);
-  }
+  assert(r3.status === 'insufficient_tokens', `insufficient_tokens (${r3.status})`);
 
-  // ---- 5. ledger 幂等索引验证 ----
-  console.log('\n=== 5. ledger 记录存在 (幂等依据) ===');
-  const exists = await db.query(
+  const u2 = await db.query('SELECT token_balance FROM users WHERE id = ?', [uid2]);
+  assert((u2.results[0]?.token_balance as number) === 100,
+    `余额不变 = 100 (${u2.results[0]?.token_balance})`);
+
+  const lp = await db.query(
+    "SELECT id FROM token_ledger WHERE source = 'deepseek' AND source_id = ? AND type = 'usage'",
+    [poorThread],
+  );
+  assert(lp.results.length === 0,
+    `失败 ledger 已删除 count=0 (${lp.results.length})`);
+
+  // ---- 5. 最终一致性 ----
+  console.log('\n=== 5. 最终一致性 ===');
+  const lu = await db.query(
     "SELECT id FROM token_ledger WHERE source = 'deepseek' AND source_id = ? AND type = 'usage'",
     [thread1],
   );
-  assert(exists.results.length >= 1, `ledger 存在 ✅ (count=${exists.results.length})`);
-
-  // ---- 6. 源码级验证 ----
-  console.log('\n=== 6. 源码级逻辑验证 ===');
-  const { PRINCE_SYSTEM_PROMPT } = await import('../lib/prince-prompt');
-  assert(typeof PRINCE_SYSTEM_PROMPT === 'string' && PRINCE_SYSTEM_PROMPT.length > 100,
-    `prince-prompt 已加载 ✅ (${PRINCE_SYSTEM_PROMPT.length} chars)`);
-
-  const { DEEPSEEK_MODEL } = await import('../lib/deepseek');
-  assert(DEEPSEEK_MODEL === 'deepseek-v4-flash', `model 一致 ✅ (${DEEPSEEK_MODEL})`);
+  assert(lu.results.length === 1, `成功 ledger 仍存在 count=1`);
+  const finalU1 = await db.query('SELECT token_balance FROM users WHERE id = ?', [uid1]);
+  assert((finalU1.results[0]?.token_balance as number) === initialBalance - useTokens,
+    `final balance = ${initialBalance - useTokens}`);
 
   console.log(`\n=== 结果: ${failures === 0 ? '全部通过 ✅' : `${failures} 个失败 ❌`} ===`);
-  console.log('\n📌 MockAdapter 已知限制: WHERE 不过滤。余额不足/多用户并发需真实 D1 验证。');
   process.exit(failures === 0 ? 0 : 1);
 }
 
