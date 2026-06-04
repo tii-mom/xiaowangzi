@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { requireEnv } from '@/lib/env';
-import { callDeepSeekChat } from '@/lib/deepseek';
-import { loadSystemPrompt } from '@/lib/load-prompt';
+import { callDeepSeekChat, DEEPSEEK_MODEL } from '@/lib/deepseek';
+import { PRINCE_SYSTEM_PROMPT } from '@/lib/prince-prompt';
+import { finalizeChatUsage } from '@/lib/chat-usage-finalizer';
 import { getPaymentUser, PaymentAuthError } from '@/lib/payment-user';
 
-const MODEL = 'deepseek-v4-flash';
 const MAX_CONTEXT_MESSAGES = 20;
-const LOW_TOKEN_THRESHOLD = 2000;
+const MIN_CHAT_TOKEN_BALANCE = parseInt(process.env.CHAT_MIN_TOKEN_BALANCE ?? '10000', 10);
 
 export async function POST(req: NextRequest) {
   try {
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
 
     const db = getDb();
 
-    if (user.token_balance < LOW_TOKEN_THRESHOLD) {
+    if (user.token_balance <= MIN_CHAT_TOKEN_BALANCE) {
       return NextResponse.json({
         error: 'Token 余额不足，请充值后继续对话',
         token_balance: user.token_balance,
@@ -42,7 +42,6 @@ export async function POST(req: NextRequest) {
       [user.id],
     );
     const userAgentId = agentRows.results[0]?.id as number | undefined;
-    const systemPrompt = loadSystemPrompt();
 
     const historyRows = await db.query(
       `SELECT role, content FROM conversations
@@ -52,7 +51,7 @@ export async function POST(req: NextRequest) {
     );
 
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: PRINCE_SYSTEM_PROMPT },
     ];
 
     for (let i = historyRows.results.length - 1; i >= 0; i--) {
@@ -68,15 +67,13 @@ export async function POST(req: NextRequest) {
     const apiKey = requireEnv('DEEPSEEK_API_KEY');
     const result = await callDeepSeekChat(messages, apiKey);
 
-    const tokensUsed = result.usage.total_tokens;
-
     await db.execute(
       `INSERT INTO conversations
        (user_id, thread_id, user_agent_id, role, content, model,
         prompt_tokens, completion_tokens, total_tokens)
        VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?)`,
-      [user.id, threadId, userAgentId ?? null, message,
-       result.usage.prompt_tokens, result.usage.completion_tokens, tokensUsed],
+      [user.id, threadId, userAgentId ?? null, message, DEEPSEEK_MODEL,
+        result.usage.prompt_tokens, result.usage.completion_tokens, result.usage.total_tokens],
     );
 
     await db.execute(
@@ -84,34 +81,42 @@ export async function POST(req: NextRequest) {
        (user_id, thread_id, user_agent_id, role, content, model,
         prompt_tokens, completion_tokens, total_tokens)
        VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?)`,
-      [user.id, threadId, userAgentId ?? null, result.content,
-       result.usage.prompt_tokens, result.usage.completion_tokens, tokensUsed],
+      [user.id, threadId, userAgentId ?? null, result.content, DEEPSEEK_MODEL,
+        result.usage.prompt_tokens, result.usage.completion_tokens, result.usage.total_tokens],
     );
 
-    await db.execute(
-      'UPDATE users SET token_balance = MAX(0, token_balance - ?), updated_at = datetime(\'now\') WHERE id = ?',
-      [tokensUsed, user.id],
-    );
+    const usageResult = await finalizeChatUsage({
+      userId: user.id,
+      threadId,
+      model: DEEPSEEK_MODEL,
+      inputTokens: result.usage.prompt_tokens,
+      outputTokens: result.usage.completion_tokens,
+      totalTokens: result.usage.total_tokens,
+    });
 
-    const users = await db.query(
-      'SELECT token_balance FROM users WHERE id = ?',
-      [user.id],
-    );
-    const remainingTokens = (users.results[0]?.token_balance as number) ?? 0;
+    if (usageResult.status === 'insufficient_tokens') {
+      return NextResponse.json({
+        reply: result.content,
+        warning: '此次对话已发送，但 Token 余额不足，请尽快充值',
+        usage: result.usage,
+        remaining_tokens: usageResult.remainingTokens ?? 0,
+        thread_id: threadId,
+      });
+    }
 
-    await db.execute(
-      `INSERT INTO token_ledger
-       (user_id, type, delta_tokens, balance_after, source, source_id,
-        model, input_tokens, output_tokens, total_tokens, estimated_cost_cents, created_at)
-       VALUES (?, 'usage', ?, ?, 'deepseek', ?, ?, ?, ?, ?, 0, datetime('now'))`,
-      [user.id, -tokensUsed, remainingTokens, threadId,
-       MODEL, result.usage.prompt_tokens, result.usage.completion_tokens, tokensUsed],
-    );
+    if (usageResult.status === 'error') {
+      return NextResponse.json({
+        reply: result.content,
+        usage: result.usage,
+        remaining_tokens: usageResult.remainingTokens ?? 0,
+        thread_id: threadId,
+      });
+    }
 
     return NextResponse.json({
       reply: result.content,
       usage: result.usage,
-      remaining_tokens: remainingTokens,
+      remaining_tokens: usageResult.remainingTokens ?? 0,
       thread_id: threadId,
     });
   } catch (err) {

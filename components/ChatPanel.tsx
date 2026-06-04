@@ -31,6 +31,32 @@ export default function ChatPanel({ onToast }: ChatPanelProps) {
     }
   }, [messages, isTyping]);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/chat/history?limit=20')
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data.messages && Array.isArray(data.messages)) {
+          const historyMsgs: Message[] = [];
+          for (let i = data.messages.length - 1; i >= 0; i--) {
+            const m = data.messages[i];
+            historyMsgs.push({
+              id: `h-${i}`,
+              sender: m.role === 'user' ? 'user' : 'prince',
+              text: m.content,
+            });
+          }
+          setMessages(historyMsgs);
+        }
+        if (typeof data.token_balance === 'number') {
+          setTokenBalance(data.token_balance);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   const sendMessage = useCallback(
     async (customText?: string) => {
       const textToSend = (customText ?? inputText).trim();

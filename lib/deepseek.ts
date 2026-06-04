@@ -1,7 +1,7 @@
 import { getEnv } from '@/lib/env';
 
 const BASE_URL = getEnv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com');
-const MODEL = getEnv('DEEPSEEK_MODEL', 'deepseek-v4-flash');
+export const DEEPSEEK_MODEL = getEnv('DEEPSEEK_MODEL', 'deepseek-v4-flash');
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -41,7 +41,7 @@ export async function callDeepSeekChat(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: MODEL,
+      model: DEEPSEEK_MODEL,
       messages,
       temperature: 0.8,
       max_tokens: 2048,
@@ -66,12 +66,16 @@ export async function callDeepSeekChat(
     throw new Error('DeepSeek returned empty response');
   }
 
+  if (!data.usage || data.usage.total_tokens <= 0) {
+    throw new Error('DeepSeek usage missing or invalid: total_tokens must be > 0');
+  }
+
   return {
     content: choice.message.content,
     usage: {
-      prompt_tokens: data.usage?.prompt_tokens ?? 0,
-      completion_tokens: data.usage?.completion_tokens ?? 0,
-      total_tokens: data.usage?.total_tokens ?? 0,
+      prompt_tokens: data.usage.prompt_tokens ?? 0,
+      completion_tokens: data.usage.completion_tokens ?? 0,
+      total_tokens: data.usage.total_tokens,
     },
   };
 }
