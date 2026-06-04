@@ -14,8 +14,8 @@ export async function POST(req: NextRequest) {
   let threadId: string | undefined;
 
   try {
-    const { message } = await req.json();
-    if (!message || typeof message !== 'string' || !message.trim()) {
+    const body = await req.json() as { message?: string };
+    if (!body.message || typeof body.message !== 'string' || !body.message.trim()) {
       return NextResponse.json({ error: '消息不能为空' }, { status: 400 });
     }
 
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    messages.push({ role: 'user', content: message });
+    messages.push({ role: 'user', content: body.message });
 
     const apiKey = requireEnv('DEEPSEEK_API_KEY');
     const result = await callDeepSeekChat(messages, apiKey);
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
        (user_id, thread_id, user_agent_id, role, content, model,
         prompt_tokens, completion_tokens, total_tokens)
        VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?)`,
-      [user.id, threadId, userAgentId ?? null, message, DEEPSEEK_MODEL,
+       [user.id, threadId, userAgentId ?? null, body.message, DEEPSEEK_MODEL,
         result.usage.prompt_tokens, result.usage.completion_tokens, result.usage.total_tokens],
     );
 

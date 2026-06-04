@@ -15,16 +15,16 @@ export default function BindPage() {
     let cancelled = false;
     async function init() {
       const sRes = await fetch('/api/bind/status');
-      const sData = await sRes.json();
+      const sData = await sRes.json() as Record<string, unknown>;
       if (cancelled) return;
-      if (sData.is_bound) { setIsBound(true); setHermesId(sData.hermes_user_id ?? sData.wechat_external_id); setLoading(false); return; }
+      if (sData.is_bound) { setIsBound(true); setHermesId(String(sData.hermes_user_id ?? sData.wechat_external_id ?? '')); setLoading(false); return; }
       if (sData.error && sRes.status === 401) { setNeedSession(true); setLoading(false); return; }
 
       const cRes = await fetch('/api/bind/create-code', { method: 'POST' });
-      const cData = await cRes.json();
+      const cData = await cRes.json() as Record<string, unknown>;
       if (cancelled) return;
       if (cData.error && cRes.status === 401) { setNeedSession(true); setLoading(false); return; }
-      setCode(cData.code); setExpiresAt(cData.expires_at); setLoading(false);
+      setCode(String(cData.code ?? '')); setExpiresAt(String(cData.expires_at ?? '')); setLoading(false);
     }
     init();
     return () => { cancelled = true; };
@@ -34,8 +34,8 @@ export default function BindPage() {
     if (isBound || needSession) return;
     const interval = setInterval(async () => {
       const r = await fetch('/api/bind/status');
-      const d = await r.json();
-      if (d.is_bound) { setIsBound(true); setHermesId(d.hermes_user_id ?? d.wechat_external_id); }
+      const d = await r.json() as Record<string, unknown>;
+      if (d.is_bound) { setIsBound(true); setHermesId(String(d.hermes_user_id ?? d.wechat_external_id ?? '')); }
     }, 3000);
     return () => clearInterval(interval);
   }, [isBound, needSession]);

@@ -28,12 +28,12 @@ export default function PayPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plan: planId }),
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setQrImg(data.qr_img);
-      setOrderId(data.order_id);
-      setPrice(data.price);
-      startPolling(data.order_id);
+      const data = await res.json() as Record<string, unknown>;
+      if (data.error) throw new Error(String(data.error));
+      setQrImg(String(data.qr_img ?? ''));
+      setOrderId(String(data.order_id ?? ''));
+      setPrice(String(data.price ?? ''));
+      startPolling(String(data.order_id ?? ''));
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建订单失败');
     } finally {
@@ -45,7 +45,7 @@ export default function PayPage() {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       const res = await fetch(`/api/pay/query?order_id=${oid}`);
-      const data = await res.json();
+      const data = await res.json() as Record<string, unknown>;
       if (data.status === 'paid') {
         setPaid(true);
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }

@@ -10,5 +10,12 @@
   },
   "observability": {
     "enabled": true
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "xiaowangzi-staging",
+      "database_id": "83f12b1f-885e-4616-a7ff-4016dbdacef2"
+    }
+  ]
 }

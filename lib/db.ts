@@ -17,6 +17,23 @@ export interface DatabaseAdapter {
 }
 
 // ---------------------------------------------------------------------------
+// D1 Binding 检测（Cloudflare Workers 原生 binding）
+// ---------------------------------------------------------------------------
+
+import { D1BindingAdapter } from './d1-binding-adapter';
+
+function getD1Binding(): D1Database | null {
+  try {
+    const ctx = ((globalThis as Record<string, unknown>)[
+      Symbol.for('__cloudflare-context__') as unknown as string
+    ]) as { env?: { DB?: D1Database } } | undefined;
+    return ctx?.env?.DB ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // D1 REST API Adapter
 // ---------------------------------------------------------------------------
 
@@ -416,7 +433,7 @@ export function createDatabaseAdapter(): DatabaseAdapter {
   if (explicitMock && isProduction) {
     throw new Error(
       '[db] Mock database adapter is not allowed in production. ' +
-      'Remove DATABASE_ADAPTER=mock and configure CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_DATABASE_ID, CLOUDFLARE_API_TOKEN.'
+      'Remove DATABASE_ADAPTER=mock and configure D1 binding or D1 credentials.'
     );
   }
 
@@ -429,20 +446,27 @@ export function createDatabaseAdapter(): DatabaseAdapter {
     return new MockAdapter();
   }
 
-  // 3. D1 凭据完整 → 使用 D1 REST Adapter
+  // 3. D1 binding 可用（Cloudflare Workers 原生）→ 优先使用
+  const d1Binding = getD1Binding();
+  if (d1Binding) {
+    console.warn('[db] 使用 D1BindingAdapter（Cloudflare Workers 原生 D1 binding）。');
+    return new D1BindingAdapter(d1Binding);
+  }
+
+  // 4. D1 REST 凭据完整 → 使用 D1 REST Adapter
   if (hasD1Config) {
     return new D1RestAdapter(accountId!, databaseId!, apiToken!);
   }
 
-  // 4. 生产环境无 D1 → 拒绝
+  // 5. 生产环境无 D1 → 拒绝
   if (isProduction) {
     throw new Error(
       '[db] Production 环境禁止使用 MockAdapter。' +
-      '请设置 CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_DATABASE_ID, CLOUDFLARE_API_TOKEN。'
+      '请配置 D1 binding（推荐）或设置 CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_DATABASE_ID, CLOUDFLARE_API_TOKEN。'
     );
   }
 
-  // 5. 非生产环境无 D1 → MockAdapter 兜底
+  // 6. 非生产环境无 D1 → MockAdapter 兜底
   console.warn(
     '[db] 使用 MockAdapter（数据仅存在于内存，重启丢失）。' +
     '如需连接真实 D1，请设置 D1 凭据。'
