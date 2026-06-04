@@ -46,9 +46,9 @@ D1 是最适合个人开发者的选择。如果后续规模增长需要更强�
 | `bind_codes` | 微信绑定配对码 | `code` UNIQUE, `status` CHECK |
 | `subscriptions` | 用户订阅 | `plan` CHECK, `status` CHECK |
 | `token_ledger` | Token 账本 | `type` CHECK, 完整追踪余额变化 |
-| `payment_orders` | 支付订单 | `order_id` UNIQUE, `status` CHECK |
+| `payment_orders` | 支付订单 | `order_id` UNIQUE, `status` CHECK, `plan` CHECK, `bufpay_aoid` 唯一索引（NULL 允许） |
 | `user_agents` | 用户子 Agent | `status` CHECK |
-| `conversations` | 对话记录 | `role` CHECK |
+| `conversations` | 对话记录 | `role` CHECK, `thread_id` NOT NULL, `user_agent_id` FK, `parent_message_id` FK |
 | `system_events` | 系统事件日志 | -- |
 | `admin_audit_logs` | 管理员操作审计 | -- |
 
@@ -64,6 +64,26 @@ D1 是最适合个人开发者的选择。如果后续规模增长需要更强�
 
 - `DatabaseAdapter` 接口：定义 `query`, `execute`, `batch` 三个方法
 - `D1RestAdapter`: 通过 Cloudflare D1 REST API 真实查询
+  - `query()` 先检查 `response.ok`（HTTP 非 2xx 抛出明确错误含 status + body 前 300 字符）
+  - JSON parse 失败抛出明确错误
 - `MockAdapter`: 内存模拟，本地开发用
 - `createDatabaseAdapter()`: 根据环境变量自动选择
-- 若 `CLOUDFLARE_*` 三变量任一缺失，自动降级为 `MockAdapter`
+  - `NODE_ENV === 'production'`：**强制**必须设置 `CLOUDFLARE_*` 三个变量，缺失直接 throw，禁止 MockAdapter
+  - `NODE_ENV === 'development' / 'test'` 或未设置 `NODE_ENV`：优先 D1，无配置降级 MockAdapter
+  - 显式 `DATABASE_ADAPTER=mock`：强制 MockAdapter
+
+## payment_orders.bufpay_aoid 唯一索引
+
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_bufpay_aoid
+    ON payment_orders(bufpay_aoid)
+    WHERE bufpay_aoid IS NOT NULL;
+```
+
+用于支付回调幂等：同一个 BufPay 订单号不会重复处理。
+`WHERE bufpay_aoid IS NOT NULL` 允许多条 pending 订单（尚未获得 aoid）共存。
+
+## conversations 模型
+
+对话使用 `thread_id` 组织一个完整会话线程，`parent_message_id` 构建消息树，
+`user_agent_id` 关联具体子 Agent。三字段均有索引。

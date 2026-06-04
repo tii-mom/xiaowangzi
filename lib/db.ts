@@ -54,7 +54,18 @@ class D1RestAdapter implements DatabaseAdapter {
       body: JSON.stringify({ sql, params }),
     });
 
-    const data: D1RestResponse = await response.json();
+    if (!response.ok) {
+      const bodyText = await response.text().catch(() => '(unable to read body)');
+      const preview = bodyText.length > 300 ? bodyText.slice(0, 300) + '...' : bodyText;
+      throw new Error(`D1 HTTP ${response.status}: ${preview}`);
+    }
+
+    let data: D1RestResponse;
+    try {
+      data = await response.json() as D1RestResponse;
+    } catch (parseErr) {
+      throw new Error(`D1 response JSON parse failed: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
+    }
 
     if (!data.success || data.errors.length > 0) {
       const errorMsg = data.errors.map((e) => e.message).join('; ');
@@ -174,17 +185,43 @@ class MockAdapter implements DatabaseAdapter {
 let _db: DatabaseAdapter | null = null;
 
 export function createDatabaseAdapter(): DatabaseAdapter {
+  const nodeEnv = process.env.NODE_ENV;
+  const explicitMock = process.env.DATABASE_ADAPTER === 'mock';
+
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const databaseId = process.env.CLOUDFLARE_DATABASE_ID;
   const apiToken = process.env.CLOUDFLARE_API_TOKEN;
 
-  if (accountId && databaseId && apiToken) {
-    return new D1RestAdapter(accountId, databaseId, apiToken);
+  const hasD1Config = Boolean(accountId && databaseId && apiToken);
+
+  // Production 环境必须使用真实 D1
+  if (nodeEnv === 'production') {
+    if (!hasD1Config) {
+      throw new Error(
+        '[db] Production 环境禁止使用 MockAdapter。' +
+        '请设置 CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_DATABASE_ID, CLOUDFLARE_API_TOKEN。'
+      );
+    }
+    return new D1RestAdapter(accountId!, databaseId!, apiToken!);
   }
 
-  console.warn('[db] Cloudflare D1 env vars not set. Using MockAdapter. All data is in-memory and will be lost on restart.');
+  // development / test 环境：优先 D1，降级 MockAdapter
+  if (hasD1Config) {
+    return new D1RestAdapter(accountId!, databaseId!, apiToken!);
+  }
 
-  return new MockAdapter();
+  // 显式 mock 或开发环境无 D1 配置 → MockAdapter
+  if (explicitMock || nodeEnv === 'development' || nodeEnv === 'test' || !nodeEnv) {
+    console.warn(
+      '[db] 使用 MockAdapter（数据仅存在于内存，重启丢失）。' +
+      '如需连接真实 D1，请设置 CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_DATABASE_ID / CLOUDFLARE_API_TOKEN。'
+    );
+    return new MockAdapter();
+  }
+
+  throw new Error(
+    `[db] 无法创建 DatabaseAdapter。NODE_ENV=${nodeEnv}, DATABASE_ADAPTER=${process.env.DATABASE_ADAPTER}`
+  );
 }
 
 export function getDb(): DatabaseAdapter {

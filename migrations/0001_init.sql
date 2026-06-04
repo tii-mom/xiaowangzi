@@ -97,7 +97,8 @@ CREATE TABLE IF NOT EXISTS payment_orders (
     user_id         INTEGER NOT NULL REFERENCES users(id),
     order_id        TEXT NOT NULL UNIQUE,
     bufpay_aoid     TEXT,
-    plan            TEXT NOT NULL,
+    plan            TEXT NOT NULL
+                    CHECK (plan IN ('free_trial', 'monthly', 'quarterly')),
     tokens_amount   INTEGER NOT NULL,
     amount_cents    INTEGER NOT NULL,
     pay_type        TEXT,
@@ -110,6 +111,9 @@ CREATE TABLE IF NOT EXISTS payment_orders (
 CREATE INDEX IF NOT EXISTS idx_payment_orders_user_id ON payment_orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_payment_orders_order_id ON payment_orders(order_id);
 CREATE INDEX IF NOT EXISTS idx_payment_orders_status ON payment_orders(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_bufpay_aoid
+    ON payment_orders(bufpay_aoid)
+    WHERE bufpay_aoid IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- user_agents: 用户独立子 Agent
@@ -133,7 +137,9 @@ CREATE INDEX IF NOT EXISTS idx_user_agents_status ON user_agents(status);
 CREATE TABLE IF NOT EXISTS conversations (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id         INTEGER NOT NULL REFERENCES users(id),
-    conversation_id INTEGER REFERENCES conversations(id),
+    thread_id       TEXT NOT NULL,
+    user_agent_id   INTEGER REFERENCES user_agents(id),
+    parent_message_id INTEGER REFERENCES conversations(id),
     role            TEXT NOT NULL
                     CHECK (role IN ('user', 'assistant', 'system')),
     content         TEXT NOT NULL,
@@ -144,6 +150,9 @@ CREATE TABLE IF NOT EXISTS conversations (
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_thread_id ON conversations(thread_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_agent_id ON conversations(user_agent_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_parent_message_id ON conversations(parent_message_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_role ON conversations(role);
 CREATE INDEX IF NOT EXISTS idx_conversations_created_at ON conversations(created_at);
 
