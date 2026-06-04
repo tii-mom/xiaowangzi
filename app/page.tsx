@@ -262,7 +262,7 @@ export default function Home() {
         <SafetyNote />
       </main>
 
-      <Footer onToast={triggerToast} onAlert={openAlert} />
+      <Footer onAlert={openAlert} />
 
       <Modal
         open={modalOpen}
