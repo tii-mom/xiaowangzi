@@ -94,9 +94,9 @@ Cloudflare Workers 配置文件，定义 Worker 名称、入口文件、资源�
 |------|------|
 | `HERMES_WEBHOOK_SECRET` | Hermes Webhook 签名密钥 |
 
-### D1 REST Adapter（PR-CF1 阶段）
+### D1 REST Adapter（PR-CF1 / PR-CF1.5 阶段）
 
-PR-CF1 继续使用 D1 REST Adapter（`lib/db.ts`），需要以下环境变量：
+PR-CF1 和 PR-CF1.5 使用 D1 REST Adapter（`lib/db.ts`），通过环境变量访问 D1：
 
 | 变量 | 说明 |
 |------|------|
@@ -104,7 +104,9 @@ PR-CF1 继续使用 D1 REST Adapter（`lib/db.ts`），需要以下环境变量�
 | `CLOUDFLARE_DATABASE_ID` | Cloudflare D1 数据库 ID |
 | `CLOUDFLARE_API_TOKEN` | Cloudflare API Token（有 D1 读/写权限） |
 
-> **注意**: PR-CF2 将引入 D1 Binding Adapter，届时不再需要 REST API 方式访问 D1。
+> **注意**:
+> - PR-CF1.5 未在 `wrangler.jsonc` 中添加 `d1_databases` binding。
+> - D1 Binding Adapter（`wrangler.jsonc` 中的 `d1_databases` 绑定）留到 PR-CF2。
 
 ### 配置方式
 
@@ -177,9 +179,9 @@ npm run cf:typegen
 ### Staging 验证结果（PR-CF1.5 — Cloudflare D1 + DeepSeek）
 
 > **验证日期**: 2026-06-04  
-> **D1 数据库**: `xiaowangzi-staging` (83f12b1f-885e-4616-a7ff-4016dbdacef2)  
+> **D1 访问方式**: D1 REST Adapter（通过 CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_DATABASE_ID / CLOUDFLARE_API_TOKEN 环境变量），**未使用** wrangler `d1_databases` binding  
 > **Preview URL**: `http://localhost:8787` (Cloudflare workerd runtime)  
-> **说明**: 所有验证使用 **真实 D1 REST Adapter**（非 MockAdapter），数据直接查询 D1 确认。
+> **说明**: 所有验证使用 **真实 D1 REST Adapter**（非 MockAdapter），数据直接查询 D1 确认。D1 Binding Adapter 留到 PR-CF2。
 
 | 功能 | 状态 | D1 验证 | 详情 |
 |------|------|---------|------|
