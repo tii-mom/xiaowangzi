@@ -397,21 +397,26 @@ export function createDatabaseAdapter(): DatabaseAdapter {
 
   const hasD1Config = Boolean(accountId && databaseId && apiToken);
 
-  if (nodeEnv === 'production') {
-    if (!hasD1Config) {
-      throw new Error(
-        '[db] Production 环境禁止使用 MockAdapter。' +
-        '请设置 CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_DATABASE_ID, CLOUDFLARE_API_TOKEN。'
-      );
-    }
-    return new D1RestAdapter(accountId!, databaseId!, apiToken!);
+  if (explicitMock) {
+    console.warn(
+      '[db] 使用 MockAdapter（DATABASE_ADAPTER=mock，数据仅存在于内存，重启丢失）。' +
+      '如需连接真实 D1，请取消设置 DATABASE_ADAPTER 并提供 CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_DATABASE_ID / CLOUDFLARE_API_TOKEN。'
+    );
+    return new MockAdapter();
   }
 
   if (hasD1Config) {
     return new D1RestAdapter(accountId!, databaseId!, apiToken!);
   }
 
-  if (explicitMock || nodeEnv === 'development' || nodeEnv === 'test' || !nodeEnv) {
+  if (nodeEnv === 'production') {
+    throw new Error(
+      '[db] Production 环境禁止使用 MockAdapter。' +
+      '请设置 CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_DATABASE_ID, CLOUDFLARE_API_TOKEN。'
+    );
+  }
+
+  if (nodeEnv === 'development' || nodeEnv === 'test' || !nodeEnv) {
     console.warn(
       '[db] 使用 MockAdapter（数据仅存在于内存，重启丢失）。' +
       '如需连接真实 D1，请设置 CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_DATABASE_ID / CLOUDFLARE_API_TOKEN。'
