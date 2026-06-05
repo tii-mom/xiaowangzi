@@ -1,9 +1,15 @@
+# 小王子 SoulMate / xiaowangzi 项目 生产环境观测与上线运维规范 (PRODUCTION_OBSERVABILITY)
+
+本规范定义了项目进入生产观察期后的每日巡检流程、设备保活要求、挂起订单对账审计机制以及生产环境已知未验证范围。
+
+---
+
 # Hermes / Agent 架构审计与实施计划报告 (HERMES_AGENT_ARCHITECTURE)
 
 本报告针对 `xiaowangzi` (小王子) 微信陪伴机器人系统的 Hermes 消息网关与“每用户一个 Agent”的系统架构进行审计，并定义后续实施的生产级设计和 PR 路线图。
 
 > [!IMPORTANT]
-> **当前状态警示**：Hermes 微信机器人网关当前未上线，且在没有完整通过 staging 联调和安全防护审查前，生产环境变量 **`AGENT_BACKEND=hermes` 保持禁止设置状态**。
+> **当前状态警示**：Hermes 微信机器人网关当前未真实上线，且在没有完整通过 staging 联调和安全防护审查前，生产环境变量 **`AGENT_BACKEND=hermes` 保持禁止设置状态**。
 
 ---
 
@@ -12,14 +18,14 @@
 ### 1.1 文件及模块现状检查
 
 * **`docs/HERMES_POC.md`**：记录了前期针对 Hermes 集成的一些假设（如 REST API 验证、Webhook 签名鉴权），目前所有实际连接和通信通道均为 **未验证 (Mock)** 状态。
-* **`app/api/webhook/hermes/route.ts`**：实现了基础的 Webhook 接收端逻辑，具备了针对 `HERMES_WEBHOOK_SECRET` 的签名校验及简单的一次性绑定码解析（通过正则 `/^[A-F0-9]{8}$/` 匹配），并在 pending 期限内通过 D1 锁定绑定状态，同时会在绑定成功后触发 `getAgentManager().createUserAgent(userId)`。
+* **`app/api/webhook/hermes/route.ts`**：实现了基础的 Webhook 接收端逻辑，能够对 `HERMES_WEBHOOK_SECRET` 进行校验。目前优先使用 `x-hermes-secret` 作为校验头（向下兼容 Authorization Bearer 头）。具备基本的一次性绑定码解析（通过正则 `/^[A-F0-9]{8}$/` 匹配），并在 pending 期限内通过 D1 锁定绑定状态，同时在绑定成功后触发 `getAgentManager().createUserAgent(userId)`。
 * **`app/api/bind/create-code/route.ts` & `status/route.ts`**：
   * `create-code`：在 D1 中为已登录的 Web 用户生成唯一的、限时 15 分钟失效的一次性 pending 绑定码。
   * `status`：返回用户的微信绑定状态（`is_bound`，判断 `hermes_user_id` 或 `wechat_external_id` 是否存在）。
 * **`/bind` 页面与 BindFlowMock**：前端已经完成了微信绑定二维码指引、绑定状态轮询交互，目前状态更新逻辑依赖前端 Mock 状态。
 * **`lib/agent-manager.ts`**：
   * 包含 `LocalAgentManager`：Web MVP 默认在 D1 数据库中创建 `status = 'active'` 的本地 Agent 代理占位行（`local-user-${userId}`），用于支持 Web Chat。
-  * 包含 `HermesAgentManager`：仅包含 skeleton 架构，凡是调用均会直接 `throw new Error` 提示未验证，防止在开发环境误用。
+  * 包含 `HermesAgentManager`：目前仍是 skeleton 状态，任何实际调用均会直接 `throw new Error` 阻断，提醒开发者当前不可启用，保障主链路安全。
 * **数据库表设计状况**：
   * `users`：包含了 `hermes_user_id` 和 `wechat_external_id`，用于绑定微信。
   * `user_agents`：存储 Agent 的基本代理关联，目前仅有 `id`, `user_id`, `agent_name`, `status` 字段。
@@ -34,9 +40,9 @@
 | **已完成能力** | Web 侧的绑定码（create-code/status）生命周期管理；本地 `user_agents` 虚拟代理占位符自动初始化；Webhook 鉴权逻辑框架。 |
 | **POC 能力** | 前端 `/bind` 二维码及绑定进度轮询交互；不依赖真实网关的内存 Mock 绑定。 |
 | **未验证能力** | 微信扫码/长连接状态同步；基于 `HERMES_WEBHOOK_SECRET` 的腾讯云与 Cloudflare 真实跨网段回调；消息收发及 Token 账本的并发扣费。 |
-| **缺失能力** | **微信消息幂等校验**（微信重试可能导致 D1 账本重复扣费）；**渠道分流**（`conversations` 无法分类）；**Agent 核心文档的装配与 Admin 后台更新架构**。 |
+| **缺失能力** | **微信消息幂等校验**（微信重试可能导致 D1 账本重复扣费）；**渠道分流与投递日志**（`conversations` 无法分类，缺少消息递送记录）；**Agent 核心文档的装配与 Admin 后台更新架构**。 |
 | **Blocker 阻碍项** | 微信 Bot 协议长连接未跑通；未冻结的每用户 Agent / 核心文档 D1 Schema。 |
-| **安全风险** | 1. 微信个人号极易因触发高频回复被官方判定为 Bot 进而封号；<br>2. 腾讯云 Hermes 实例如果直接持有 DeepSeek API Key 或直连 D1，将面临极大的信息安全和秘钥泄露风险（Hermes 必须定位为**无状态无秘钥网关**）。 |
+| **安全风险** | 1. 微信个人号极易因触发高频回复被官方判定为 Bot 进而封号；<br>2. 腾讯云 Hermes 实例如果直接持有敏感 Key，将面临极大的信息安全和秘钥泄露风险（必须贯彻**无状态无敏感秘钥网关**原则）。 |
 | **Web MVP 边界** | **Cloudflare 端** 承担全部大脑控制（大模型调用、核心文档拼接、D1 账本计费与存储）；**腾讯云 Hermes 端** 仅作为长连接网络通道，只负责接收/呈现微信消息。 |
 
 ---
@@ -50,15 +56,15 @@
 3. **Web Chat 当前使用的 Agent 与未来微信 Agent 是否会是同一个？**
    * **答**：是的。为了保证用户对话体验的连贯性与长期记忆的同步，两端必须共用同一个 Agent Brain 与账本。
 4. **LocalAgentManager 和 HermesAgentManager 的边界是什么？**
-   * **答**：原先的 HermesAgentManager 设想在 Hermes 网关侧同步镜像 Agent。**新架构决定废弃此边界**：将所有的 Agent 逻辑和状态管理收回 Cloudflare 端。因此，微信端和 Web 端统一共用 `AgentManager`，Hermes 网关保持彻底的无状态。
+   * **答**：`HermesAgentManager` 当前仍是 skeleton，绝对不能启用。短期内保留，但不能承担 Agent Brain 逻辑。后续建议将 `HermesAgentManager` 重构为 `HermesGatewayClient` / `HermesChannelAdapter` 等纯通道适配层。Agent Brain 逻辑（大模型调用、核心文档组装、D1 存储、扣费账本）将始终驻留在 Cloudflare API 侧。
 5. **HermesAgentManager 现在缺什么？**
-   * **答**：应废弃其在网关侧生成 Agent 镜像的设计。缺的是 Cloudflare 侧统一装配核心文档、进行消息推送回调的标准 Webhook 网关客户端。
+   * **答**：当前缺的是无状态的网关客户端定义，以及用于往腾讯云 Hermes 网关推送微信回复消息的通道发送接口。
 6. **每个 Agent 的“核心文档”应该存哪里？**
-   * **答**：应存储在生产 D1 数据库的新建表 `agent_core_documents` 中，通过物理隔离和版本化管理规避泄露和注入。
+   * **答**：应存储在生产 D1 数据库中的 `agent_core_documents` 新增表中。
 7. **当前 prince prompt TS 常量是否只能算全局默认 prompt？**
    * **答**：是的。它是一个系统级别的全局兜底人设，用于规范最基础的性格基调与自残/自杀危机干预边界。
 8. **是否需要新增核心表？**
-   * **答**：需要新增 `agent_profiles`（存储不同 Agent 人设、偏好与昵称）以及 `agent_core_documents`（存储 Agent 专有核心参考文档）。至于长期记忆 `agent_memories` 等可在后续 PR 中以非阻塞形式追加。
+   * **答**：需要新增 `agent_profiles`（存储不同 Agent 人设、偏好与昵称）以及 `agent_core_documents`（存储 Agent 专有核心参考文档）。
 9. **`conversations` 是否需要增加 `channel/source` 字段？**
    * **答**：需要。应增加 `channel` 字段（`web` / `hermes`），以便细分聊天记录来源，并新增 `external_message_id` 以便支持微信重试消息的幂等去重。
 10. **微信消息幂等如何做？**
@@ -122,7 +128,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_core_docs_agent_status ON agent_core_docume
 
 ---
 
-## 5. 生产微信绑定流程设计 (WeChat Binding Flow)
+## 5. 微信绑定正式化设计 (WeChat Binding Flow)
 
 ```
 [Web 用户]                 [Cloudflare Workers]             [Hermes (Tencent Cloud)]      [微信端]
@@ -134,7 +140,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_core_docs_agent_status ON agent_core_docume
     |<------------------------------|                                  |                     |
     | 3. 展示 8位大写十六进制绑定码   |                                  |                     |
     |                               |                                  |                     |
-    | 4. 向小王子微信公众号/个人号发送绑定码 ------------------------------------------------->|
+    | 4. 向小王子微信个人号/Hermes 托管微信号发送绑定码 ---------------------------------------->|
     |                                                                  |                     |
     |                                                                  | 5. 收到消息并捕获码 |
     |                                                                  |                     |
@@ -184,13 +190,28 @@ CREATE INDEX IF NOT EXISTS idx_agent_core_docs_agent_status ON agent_core_docume
 ### 6.2 环境变量清单 (`.env`)
 ```bash
 PORT=3001
-CLOUDFLARE_WEBHOOK_URL=https://wan.lat/api/pay/notify # 后续改为 /api/webhook/hermes
+CLOUDFLARE_WEBHOOK_URL=https://wan.lat/api/webhook/hermes
 HERMES_PORT=3001
 WECHAT_CONN_MODE=ilink # 微信通信模式
 # 生产环境运行中绝对不在腾讯云端跑 Next.js 页面与 D1 数据库，保持无状态。
 ```
 
-### 6.3 内存限制与 PM2 守护 (`pm2.config.js`)
+### 6.3 秘钥与签名边界保护
+* **腾讯云 Hermes 实例严禁持有以下敏感密钥**：
+  * `DEEPSEEK_API_KEY` (大模型 API key)
+  * `D1 / Cloudflare API Token` (数据库与 Workers 访问凭证)
+  * `BUFPAY_APP_SECRET` (支付商户密钥)
+  * `SESSION_SECRET` (Web会话加密密钥)
+  * `ADMIN_TOKEN` (管理员口令)
+* **允许持有的最小凭证**：
+  * `HERMES_WEBHOOK_SECRET` (用于调用 Cloudflare `/api/webhook/hermes` 时的签名校验)
+
+* **接口地址严正隔离**：
+  * `/api/pay/notify` **仅限且只能**用于接收 BufPay 支付回调。
+  * `/api/webhook/hermes` **仅限且只能**用于接收 Hermes 微信消息推送。
+  * **两者绝对不能混用**。
+
+### 6.4 内存限制与 PM2 守护 (`pm2.config.js`)
 为防止 Node-Wechat 内存泄漏，设置 `max_memory_restart` 限制为 2G 强制重启：
 ```javascript
 module.exports = {
@@ -221,7 +242,7 @@ module.exports = {
          v
   [Hermes 发起 POST 请求至 CF /api/webhook/hermes]
          |
-         +--> [校验 x-hermes-secret / Bearer Token] -> 失败抛出 403
+         +--> [校验 x-hermes-secret Header] -> 失败抛出 403
          |
          +--> [D1 唯一索引查询 external_message_id] -> 重复则直接返回 200 (幂等)
          |
@@ -250,7 +271,12 @@ module.exports = {
   [Hermes 接收 JSON 并渲染推送至用户微信]
 ```
 
-### 7.2 Webhook 响应数据格式
+### 7.2 Webhook 校验协议
+* **统一 Header 鉴权方式**：
+  * 请求必须携带 Header: `x-hermes-secret: <HERMES_WEBHOOK_SECRET>` 
+  * 注：未来架构升级时可考虑逐步迁移至标准 `Authorization: Bearer <HERMES_WEBHOOK_SECRET>`，当前联调以 `x-hermes-secret` 为准。
+
+### 7.3 Webhook 响应数据格式
 ```json
 {
   "ok": true,
@@ -262,63 +288,71 @@ module.exports = {
 
 ---
 
-## 8. 数据库迁移方案变更建议 (Migrations)
+## 8. 数据库迁移方案与候选表设计建议 (Migrations)
 
-以下为后续 PR-HERMES1 构建时拟引入的数据库 D1 变更：
+以下为后续 PR 实施推进过程中，可能引入的 D1 数据库表结构变更建议（作为候选方案，不一定在 PR-HERMES1 一次性落地）：
 
-1. **`conversations` 表扩充**：
-   * `channel` (TEXT, 限制为 `'web'`, `'hermes'`)。
-   * `external_message_id` (TEXT, 建立唯一索引以去重)。
-2. **`user_agents` 表扩充**：
-   * `agent_profile_id` (INTEGER REFERENCES `agent_profiles`)。
-   * `core_document_id` (INTEGER REFERENCES `agent_core_documents`)。
-3. **新增 `agent_profiles` 表**：人设基本描述。
-4. **新增 `agent_core_documents` 表**：版本化管理人设核心参考文档。
+### 8.1 候选新增表
+1. **`agent_profiles`** (Agent人设表)：存储特定的名称、头像、语调风格描述。
+2. **`agent_core_documents`** (核心文档表)：存储版本化管理的用户核心参考知识库与文档。
+3. **`agent_bindings`** 或 **`user_agent_bindings`**：记录 Agent 与不同渠道标识（如 Web UUID、微信开放 ID、iLink ID）的细粒度绑定映射。
+4. **`hermes_messages`**：记录微信外部消息的 `message_id`、排队状态及处理状态，用于极端高并发下的防抖与幂等去重。
+5. **`hermes_delivery_logs`**：记录回复消息推回微信渠道的发送日志（包含发送成功/失败、重试次数及异常报错原因）。
+
+### 8.2 候选字段扩充
+1. `conversations.channel` (区分 `'web'` / `'hermes'`)。
+2. `conversations.external_message_id` (微信推送的唯一 MsgId 索引)。
+3. `conversations.agent_id` (关联具体交互的 Agent 实体)。
+4. `user_agents.agent_type` (代理类型描述)。
+5. `user_agents.core_document_id` (关联当前处于 active 状态的核心参考文档)。
+6. `bind_codes.consumed_at` (记录配对码实际被兑换消耗的时间戳)。
 
 ---
 
 ## 9. 生产环境安全边界与风控限制 (Security Boundary)
 
-* **绝对禁止事项**：
-  * **在生产环境启用 `AGENT_BACKEND=hermes`**。在所有联调与压力测试未通过前，均使用 LocalAgentManager。
-  * **Hermes 持有密钥**：腾讯云 Hermes 严禁持有 DeepSeek API Key 或直接读写 D1，防止被侵入后导致账目和模型密钥泄露。
-  * **绕过 Webhook Secret**：Cloudflare 的 Webhook 接收端在生产环境如果未提供正确的 `HERMES_WEBHOOK_SECRET`，必须强阻断并返回 `403 Forbidden`。
-* **风控防御**：
-  * 微信个人号容易面临被腾讯官方封锁的风控。Hermes 必须在断线、重连和无法唤起长连接时向 `system_events` 上报异常。
-  * 日志脱敏：调试日志在云端保留期统一限制在 7 天内，超时自动擦除。
+* **安全红线**：
+  * **在所有 staging 测试与大模型并发回调扣费压测验证通过前，AGENT_BACKEND 保持禁用 (local) 状态**。
+  * **微信个人号被动风控**：微信个人号挂机存在较高的封号风险。系统必须具备通过 `system_events` 对长连接心跳失效进行检测和报警的机制。
+  * **日志留存期安全防护**：调试原始日志留存上限严格设为 7 天，定时物理擦除，防止聊天记录及用户隐私在云端留存过久。
 
 ---
 
-## 10. 后续 PR 逐步推进路线图 (Roadmap)
+## 10. 后续 PR 逐步推进路线图 (Roadmap & Gates)
 
 ### PR-HERMES1：Agent profile + core document schema
 * **目标**：新建 `agent_profiles` 与 `agent_core_documents` 数据库表，并扩充 `conversations` 字段（`channel`, `external_message_id`）。
-* **修改文件**：新增 D1 数据库迁移 SQL。
+* **安全门**：**绝对禁止**在生产或测试环境设置 `AGENT_BACKEND=hermes`。
 * **验收标准**：通过本地 wrangler d1 迁移，生成无损新表并验证字段。
-* **不做事项**：不编写任何微信端长连接接口。
+* **回滚方式**：运行降级 SQL 迁移删除新增列与表。
 
 ### PR-HERMES2：微信绑定生产化
 * **目标**：完善 Cloudflare 端微信绑定 Webhook 校验、唯一性冲突防护与 system_events 记录。
+* **安全门**：**绝对禁止**设置 `AGENT_BACKEND=hermes`。
 * **修改文件**：`app/api/webhook/hermes/route.ts`。
 * **验收标准**：模拟发送已绑定、不存在绑定码、绑定码过期的 mock 请求，返回对应的拦截信息。
 
 ### PR-HERMES3：腾讯云 Hermes 独立部署文档与脚本
 * **目标**：编写部署至腾讯云所需的 `PM2` 配置文件、安装脚本与无状态 Gateway 目录脚手架。
+* **安全门**：**绝对禁止**设置 `AGENT_BACKEND=hermes`。
 * **修改文件**：新增 `hermes/*` 目录及部署运行文档。
 * **验收标准**：在测试机启动 PM2 成功拉起守护进程，模拟掉线重连。
 
 ### PR-HERMES4：Hermes Webhook Staging 联调
 * **目标**：打通腾讯云网关与 Cloudflare 之间的 Webhook 通道，利用 Mock 消息完成双端收发链路。
+* **安全门**：仅限在 Staging 联调环境下将 `AGENT_BACKEND` 临时设为 `hermes`，生产环境继续禁用。
 * **修改文件**：开发接口验证工具与调试工具。
 * **验收标准**：在 Staging 域名成功接收并正确解析 Hermes 发来的测试消息。
 
 ### PR-HERMES5：微信消息收发 + DeepSeek + token_ledger 扣费闭环
 * **目标**：合并大模型接口调用与 `token_ledger` 计费，完成最终微信端扣款闭环。
+* **安全门**：只有本阶段在 Staging 环境下通过全部压测及幂等扣费校验后，才允许提交 PR 并推进至 PR-HERMES6 灰度上线评估。
 * **修改文件**：`app/api/webhook/hermes/route.ts`。
-* **验收标准**：用测试微信向 Bot 发送消息，账本扣费数符合 usage 结果，重复发送被幂等忽略。
+* **验收标准**：用测试微信向 Bot 发送消息，账本扣减数符合 usage 结果，重复发送被幂等忽略。
 
 ### PR-HERMES6：灰度上线与告警
-* **目标**：上线微信网关，接入小部分用户并设定健康度和连接丢失预警阈值。
+* **目标**：灰度上线微信网关，接入小部分用户并设定健康度和连接丢失预警阈值。
+* **安全门**：灰度上线前**不得对外宣称微信机器人已上线**，防止因个人微信号异常掉线导致大面积客诉。
 * **修改文件**：`docs/PRODUCTION_OBSERVABILITY.md` (增加微信部分)。
 * **验收标准**：微信掉线时能在控制台及告警渠道获取相应推送。
 
