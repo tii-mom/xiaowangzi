@@ -198,7 +198,16 @@ fetch('https://wan.lat/api/pay/create-order', {
      raw_notify_json: 'manual_reconciled'
    });
    ```
-3. **审计备份**: 将此补单流程作为操作记录记录入 `admin_audit_logs` 审计表中以备财务对账。
+### 12.4 生产测试数据手动修正与审计记录
+对于在测试/试运行期间的任何手动数据订正（如对于 user_id=7 出现的并发重复加币进行手动轧差对齐），**绝对禁止直接后台修改 users.token_balance 且不做记录**。
+
+必须遵循以下规范：
+1. 使用安全对齐 SQL（如 `UPDATE users SET token_balance = (SELECT SUM(delta_tokens) FROM token_ledger WHERE user_id = X) WHERE id = X;`）使余额与账本保持一致。
+2. 必须向 `admin_audit_logs` 数据库表中插入对应的操作审计日志，说明原因和操作人，供后期财务和安全审计备查。例如：
+   ```sql
+   INSERT INTO admin_audit_logs (admin_email, action, target_type, target_id, details)
+   VALUES ('ops@wan.lat', 'recalibrate_user_balance', 'user', '7', 'Recalibrate user 7 balance due to concurrency race condition: reset balance to 110000 tokens matching token_ledger sum.');
+   ```
 
 ---
 
