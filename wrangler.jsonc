@@ -40,12 +40,12 @@
         "DEPLOY_ENV": "production",
         "CHAT_MIN_TOKEN_BALANCE": "10000",
         "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
-        "DEEPSEEK_MODEL": "deepseek-chat",
+        "DEEPSEEK_MODEL": "deepseek-v4-flash",
         "APP_URL": "https://wan.lat",
         "NEXT_PUBLIC_APP_URL": "https://wan.lat",
         "BUFPAY_NOTIFY_URL": "https://wan.lat/api/pay/notify",
         "BUFPAY_RETURN_URL": "https://wan.lat/dashboard",
-        "BUFPAY_AMOUNT_TOLERANCE_CENTS": "10"
+        "BUFPAY_AMOUNT_TOLERANCE_CENTS": "0"
       },
       "d1_databases": [
         {
