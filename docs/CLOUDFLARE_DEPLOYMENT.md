@@ -1,32 +1,38 @@
 # Cloudflare Workers 部署方案 (POC)
 
-> **状态**: POC（概念验证）/ 非生产上线  
-> **最后更新**: 2026-06-04
+> **状态**: POC（概念验证）/ 验证通过  
+> **最后更新**: 2026-06-05
 
 ## 当前状态说明
 
-1. 本方案是 Cloudflare Workers 部署的 **POC（概念验证）**，不代表已经生产上线。
-2. 仅在验证通过后，才会推进到正式上线阶段。
-3. 当前主线仍为腾讯云 standalone 部署（见 `docs/DEPLOYMENT.md`）。
+1. 本方案是 Cloudflare Workers 部署的 **POC（概念验证）**。
+2. 经过微信与支付宝的真实 E2E 扫码支付测试，证明整体技术闭环已**完全跑通**。
 
 ---
 
 ## 架构分工
 
+### 架构口径说明
+
+- **主线定位**：当前 Web/API 主线为 **Cloudflare Workers**。
+- **腾讯云定位**：腾讯云仅负责 **Hermes / 微信机器人 / iLink / 长连接**。
+- **微服务解耦**：Hermes 的状态与部署情况**不阻塞** Web MVP 的运行与测试。
+- **后端设置**：当前默认使用 `LocalAgentManager`。除非对接联调，请**不要设置 `AGENT_BACKEND=hermes`**。
+
 ### Cloudflare 负责
 
-- Next.js 前端（wan.lat）
+- Next.js 前端（`wan.lat`）
 - Next.js API Routes
 - Cloudflare D1 数据库
 - DeepSeek API 调用
-- BufPay 支付回调（/api/pay/notify）
-- Web session（/api/auth/web-session）
+- BufPay 支付回调（`/api/pay/notify`）
+- Web session（`/api/auth/web-session`）
 - Dashboard / Pay / Bind / Admin 页面
-- Hermes webhook 接收（/api/webhook/hermes）
+- Hermes webhook 接收（`/api/webhook/hermes`）
 
 ### 腾讯云负责
 
-- Hermes Agent（hermes.wan.lat）
+- Hermes Agent（`hermes.wan.lat`）
 - 微信机器人
 - iLink / 扫码 / 个人号消息收发
 - 长连接
@@ -54,11 +60,11 @@
 
 ### wrangler.jsonc
 
-Cloudflare Workers 配置文件，定义 Worker 名称、入口文件、资源目录和兼容性设置。
+Cloudflare Workers 配置文件，定义 Worker 名称、入口文件、资源目录和 D1 数据库绑定。
 
 ### open-next.config.ts
 
-@opennextjs/cloudflare 的配置入口，当前使用默认配置。
+`@opennextjs/cloudflare` 的配置入口，当前使用默认配置。
 
 ---
 
@@ -84,9 +90,9 @@ Cloudflare Workers 配置文件，定义 Worker 名称、入口文件、资源�
 |------|------|
 | `BUFPAY_AID` | BufPay 商户 ID |
 | `BUFPAY_APP_SECRET` | BufPay 应用密钥 |
-| `BUFPAY_NOTIFY_URL` | BufPay 支付回调地址（`https://wan.lat/api/pay/notify`） |
-| `BUFPAY_RETURN_URL` | BufPay 支付完成跳转地址（`https://wan.lat/dashboard`） |
-| `BUFPAY_AMOUNT_TOLERANCE_CENTS` | 金额容差（分，默认 `0`） |
+| `BUFPAY_NOTIFY_URL` | BufPay 支付回调地址（`https://pay-staging.wan.lat/api/pay/notify`） |
+| `BUFPAY_RETURN_URL` | BufPay 支付完成跳转地址（`https://pay-staging.wan.lat/dashboard`） |
+| `BUFPAY_AMOUNT_TOLERANCE_CENTS` | 金额容差（分，默认 `10`）。详见下方“金额容差与微调说明” |
 
 ### Hermes Webhook
 
@@ -104,10 +110,10 @@ Cloudflare Workers 配置文件，定义 Worker 名称、入口文件、资源�
 | 2 | **D1RestAdapter** | 有 `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_DATABASE_ID` / `CLOUDFLARE_API_TOKEN` | `lib/db.ts` |
 | 3 | MockAdapter | 非生产环境兜底 | `lib/db.ts` |
 
-#### D1BindingAdapter（PR-CF2 新增）
+#### D1BindingAdapter (原生 D1 绑定)
 
 `wrangler.jsonc` 中添加 `d1_databases` binding：
-```jsonc
+```json
 {
   "d1_databases": [
     {
@@ -119,11 +125,9 @@ Cloudflare Workers 配置文件，定义 Worker 名称、入口文件、资源�
 }
 ```
 
-Worker 运行时通过 `getCloudflareContext()` 的 `env.DB` 获取原生 D1 绑定。
+#### D1RestAdapter (REST API 远程访问)
 
-#### D1RestAdapter（PR-CF1 引入）
-
-通过环境变量访问 D1：
+通过本地环境变量访问 D1：
 
 | 变量 | 说明 |
 |------|------|
@@ -133,7 +137,7 @@ Worker 运行时通过 `getCloudflareContext()` 的 `env.DB` 获取原生 D1 绑
 
 ### 配置方式
 
-Cloudflare Workers 环境变量通过以下方式配置：
+Cloudflare Workers 环境变量配置：
 
 ```bash
 # Secret（加密存储）
@@ -151,7 +155,7 @@ npx wrangler deploy --var APP_URL:https://wan.lat
 
 ---
 
-## 命令
+## 常用部署命令 (Runbook)
 
 ### 本地预览
 
@@ -159,12 +163,12 @@ npx wrangler deploy --var APP_URL:https://wan.lat
 npm run cf:preview
 ```
 
-这将构建 Cloudflare Workers 版本并启动本地预览服务器。
+构建 Cloudflare Workers 并在本地预览。
 
-### E2E Smoke 测试
+### 远端冒烟测试
 
 ```bash
-BASE_URL=<cf-preview-url> npx tsx scripts/test-e2e-smoke.ts
+BASE_URL=https://pay-staging.wan.lat npx tsx scripts/test-e2e-smoke.ts
 ```
 
 ### 部署
@@ -173,211 +177,74 @@ BASE_URL=<cf-preview-url> npx tsx scripts/test-e2e-smoke.ts
 npm run cf:deploy
 ```
 
-部署前需配置远端 secrets：
-
-```bash
-npx wrangler secret put SESSION_SECRET
-npx wrangler secret put ADMIN_TOKEN
-npx wrangler secret put DEEPSEEK_API_KEY
-npx wrangler secret put HERMES_WEBHOOK_SECRET
-```
-
-`wrangler.jsonc` 中的 `vars` 字段已包含 staging 默认值（APP_ENV, DEPLOY_ENV, CHAT_MIN_TOKEN_BALANCE 等）。
-
 ### TypeScript 类型生成
 
 ```bash
 npm run cf:typegen
 ```
 
-生成 `cloudflare-env.d.ts`，提供 Cloudflare Workers 环境变量类型提示。
+生成 `cloudflare-env.d.ts` 以提供环境变量类型声明。
+
+### 回滚方式
+
+1. **Cloudflare Workers 部署版本回滚**：在 Cloudflare Dashboard → Workers & Pages → xiaowangzi → Deployments → 选择历史部署版本进行一键回滚。
+2. **本地重新部署历史 Commit**：`git checkout <commit_sha> && npm run cf:deploy`。
 
 ---
 
-## 回滚方式
+## Staging 验证结果 (PR-CF4c — 真实扫码支付联调)
 
-1. **Cloudflare Workers 历史版本回滚**：在 Cloudflare Dashboard → Workers & Pages → xiaowangzi → Deployments → 选择历史版本回滚。
-2. **重新部署上一个 commit**：`git checkout <previous-commit> && npm run cf:deploy`
+> **验证日期**: 2026-06-05  
+> **Staging URL**: `https://pay-staging.wan.lat`  
+> **D1 binding**: `DB` (`xiaowangzi-staging`, D1BindingAdapter)
 
----
+### 1. 真实扫码与技术闭环验证状态
 
-## Workers Runtime 兼容性
+- **微信支付真实扫码**: ✅ **已验证**。手机微信扫码真实支付 0.10 元，BufPay 安卓监听 App 在后台自动捕获并推送 Webhook，本地订单状态成功流转为 `paid` 并完成记账（额度 +100，订阅激活）。
+- **支付宝真实扫码**: ✅ **已验证**。手机支付宝扫码真实支付 0.10 元，BufPay 成功自动回调，本地订单状态转为 `paid` 且记账闭环和订阅（`staging_test_10c`）激活验证完全通过。
+- **自动 Webhook 回调**: ✅ **已验证**。回调均由 BufPay 平台真实推送（`auto_notify`），在 Cloudflare WAF 中对 `/api/pay/notify` 进行了放行配置以绕过 Bot 拦截，整体测试中无需任何手动补单或 curl 模拟。
 
-### 未验证项汇总（PR-CF1.5 状态）
+### 2. 金额容差与微调说明 (`BUFPAY_AMOUNT_TOLERANCE_CENTS=10`)
 
-| 功能 | 状态 | 备注 |
-|------|------|------|
-| **HermesAgentManager** | ⏭️ 未验证 | Hermes 未验证，不可设置 `AGENT_BACKEND=hermes` |
-| **BufPay 端到端支付** | ⚠️ 部分验证 | 签名验证通过（见下方），订单创建需完整 auth session |
+- **定位与作用**：此 10 分钱容差设定是 **Staging 环境下的真实扫码联调配置**。
+- **使用场景**：个人免签收款方案（如 BufPay）在多用户并发支付相同套餐时，会通过微调几分钱金额（如 0.10 -> 0.11 或 0.09）来防止多用户支付占位冲突。该容差用于兼容此微调行为，防止由于几分钱的偏差导致订单拒付。
+- **生产配置指引**：此配置**不代表**生产环境（`production`）的最终配置。在下一阶段 **PR-CF5** 中，必须根据生产环境收款码的并发需求重新评估并确认容差。为了保障业务与财务安全，生产环境建议**优先从严配置**（如设置为 0 或极小范围）。
 
-### Staging 验证结果（PR-CF1.5 — Cloudflare D1 + DeepSeek）
+### 3. Debug 接口说明 (`/api/debug/bufpay-ping`)
 
-> **验证日期**: 2026-06-04  
-> **D1 访问方式**: D1 REST Adapter（通过 CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_DATABASE_ID / CLOUDFLARE_API_TOKEN 环境变量），**未使用** wrangler `d1_databases` binding  
-> **Preview URL**: `http://localhost:8787` (Cloudflare workerd runtime)  
-> **说明**: 所有验证使用 **真实 D1 REST Adapter**（非 MockAdapter），数据直接查询 D1 确认。D1 Binding Adapter 留到 PR-CF2。
+- **定位与作用**：`/api/debug/bufpay-ping` 是一个**仅限 Staging 环境的调试端点 (staging-only debug endpoint)**，免验签，直接将请求头和客户端 IP 记录到 `system_events` 中。
+- **生产安全防范**：为避免安全隐患，在生产环境（`production`）下，此路由会**严格拦截并返回 403 Forbidden**，确保不会被外部利用，不可用于生产健康检查。
+- **后续处理**：该端点目前仅作为可达性测试的临时排查工具。在后续的 **PR-CF5** 阶段，可以根据需要决定保留该端点（作为受限的 debug 工具）或直接将其代码从项目中移除。
 
-| 功能 | 状态 | D1 验证 | 详情 |
-|------|------|---------|------|
-| API Routes (Route Handlers) | ✅ | N/A | `/api/health`、`/api/auth/web-session` 等 |
-| Cookie set/read | ✅ | N/A | `auth_token` cookie |
-| POST body JSON 解析 | ✅ | N/A | web-session、chat/send |
-| x-www-form-urlencoded body 解析 | ✅ | N/A | BufPay notify `URLSearchParams` 解析 |
-| BufPay MD5 签名验证 | ✅ | N/A | 正确签名通过，错误签名 400 拒绝 |
-| node:crypto / crypto.randomBytes | ✅ | N/A | `nodejs_compat` 已启用 |
-| **D1 REST Adapter** | ✅ | ✅ | 真实 D1 读写，users 表 2 条记录 |
-| **auth_sessions 创建** | ✅ | ✅ | 2 个 session 持久化到 D1 |
-| **token_ledger 写入 (grant)** | ✅ | ✅ | grant: +10000, source=free_trial |
-| **token_ledger 写入 (usage)** | ✅ | ✅ | usage: -598, balance_after=9402 |
-| **DeepSeek fetch** | ✅ | N/A | 真实 API 调用，小王子正常回复 |
-| **conversations 写入** | ✅ | ✅ | user + assistant 消息持久化 |
-| **Chat usage finalizer** | ✅ | ✅ | 598 tokens 正确扣减，balance: 10000→9402 |
-| **Admin overview** | ✅ | ✅ | users_count: 2 |
-| Payment finalizer | ⚠️ | N/A | 签名验证通过，订单创建需额外步骤 |
-| system_events 写入 | ⏭️ | 未测试 | 未触发系统事件 |
+### 4. 测试套餐生产隔离设计 (staging_test_10c)
 
-### Remote Staging 验证结果（PR-CF3 — Cloudflare Workers 远端部署）
+为保障生产环境安全，测试套餐 `staging_test_10c`（0.10 元）配置了严格的环境隔离机制：
+- **接口拦截**: `/api/pay/create-order` 会检测当前环境。当判定处于生产环境（`APP_URL` 为 `https://wan.lat` 或 `https://www.wan.lat`）且用户尝试创建测试订单时，接口会抛出 `400` 拦截创单。
+- **前端隐藏**: 在检测到生产环境域名时，收银台页面（`/pay`）将自动过滤并隐藏测试套餐，防止真实用户可见。
 
-> **验证日期**: 2026-06-04  
-> **远端 URL**: `https://xiaowangzi.348421501.workers.dev`  
-> **D1 binding**: `DB` (xiaowangzi-staging, D1BindingAdapter)  
-> **说明**: Worker 部署到 Cloudflare 远端，使用 `wrangler deploy`。所有验证通过远端 URL 发起，数据写入远程 D1。
+### 5. 联调验证测试指令
 
-| 功能 | 状态 | D1 确认 | 详情 |
-|------|------|---------|------|
-| **远端 Worker 部署** | ✅ | N/A | `wrangler deploy` 成功 |
-| GET /api/health | ✅ | N/A | `{"ok":true}` |
-| POST /api/auth/web-session | ✅ | ✅ | User 3/4 创建，session 持久化 |
-| GET /api/user/me | ✅ | N/A | id match |
-| GET /api/user/tokens | ✅ | ✅ | ledger 数据正确 |
-| GET /api/user/orders | ✅ | N/A | orders array |
-| GET /legal/privacy | ✅ | N/A | 200 |
-| GET /legal/terms | ✅ | N/A | 200 |
-| **POST /api/chat/send** | ✅ | ✅ | DeepSeek 真实回复, 516 tokens |
-| **token_ledger (grant)** | ✅ | ✅ | +10000, free_trial |
-| **token_ledger (usage)** | ✅ | ✅ | -516, balance=9484 |
-| **conversations 写入** | ✅ | ✅ | user + assistant 消息 |
-| GET /api/admin/overview | ✅ | ✅ | users_count: 4 |
-| BufPay x-www-form-urlencoded | ⚠️ | N/A | 本地验证通过，远端未单独测试 |
+#### 执行回归与对账测试
 
-#### 2. 已通过 (Staging Verification Passed) — 仅限创单与签名回调技术链路 (PR-CF4b)
-- **create-order Blocker 解除**: 在接口请求体中明确传入 `format: 'json'` 参数，BufPay 接口在成功配置收款二维码后，已能正确以 JSON 返回包含订单和付款二维码的数据，成功解除 HTML Cashier 页面阻断问题。
-- **返回订单支付数据**:
-  - `status`: `"ok"`
-  - `aoid`: BufPay 内部订单号 (如 `21816bc872ba4819b65d4d214841386a`)
-  - `pay_type`: `wechat` (或 `alipay`)
-  - `price`: 订单实际价格 (支持金额微调, 如 `28.98` 或 `29.00`)
-  - `qr`: 支付二维码数据
-  - `expires_in`: 订单过期时间 (秒)
-  - `return_url`: 用户支付完成跳转页面
-- **Signed Notify 技术链路通过**:
-  - 成功验证：用户登录、获取真实订单、D1 确认为 pending、模拟签名 notify 触发、订单自动流转为 `paid`、`token_ledger` purchase 写入、用户余额 `token_balance` 增加、subscriptions active、防重幂等及安全边界检测。
-- **金额容差微调兼容说明**: 
-  - Staging 环境中 `BUFPAY_AMOUNT_TOLERANCE_CENTS` 设定为 `10`（10分）。
-  - **原因**: 个人免签收款在并发支付相同金额套餐时，BufPay 会通过微调几分钱金额（如 29.00 -> 28.98）来防止多用户支付占位冲突。
-  - **生产考量**: 此 10 分钱容差为 Staging 阶段技术闭环验证配置。在下一阶段 PR-CF5 中，生产环境的最终容差需要进一步明确，生产环境建议优先使用保守设置（如 0 或极小范围），除非 BufPay 实测回调确实需要微调容差。
-- **联调测试脚本**: `scripts/test-bufpay-staging.ts` 执行成功，退出码为 `0`。
-- **远端冒烟测试**: `scripts/test-e2e-smoke.ts` 验证通过，退出码为 `0`。
-
-#### 3. 未验证项 (Staging 局限说明 — 并不代表生产完全上线)
-- **用户真实扫码支付**: 尚未有人工进行真钱微信/支付宝扫码付；
-- **真实扣款链路**: 尚未进行微信/支付宝账户扣款测试；
-- **APP 到账检测**: 尚未通过手机端的 BufPay App 监听通知并发起真实到账 webhook notify；
-- **生产环境**: 生产域名 `wan.lat` 与生产 Secrets 配置；
-- **Hermes 微信机器人**: `HermesAgentManager` 核心对话控制流仍待后续单独验证。
-
-#### 4. 联调验证测试指令
-- **测试子链路（结算记账与幂等）**:
+- **测试完整 Staging 记账与回调逻辑 (回归测试)**:
   ```bash
-  BASE_URL=https://xiaowangzi.348421501.workers.dev \
+  BASE_URL=https://pay-staging.wan.lat \
   BUFPAY_APP_SECRET=$BUFPAY_APP_SECRET \
-  npx tsx scripts/test-bufpay-notify-finalizer.ts
+  node --experimental-strip-types scripts/test-bufpay-staging.ts
   ```
-  *(注: 此脚本使用 D1 REST API 直连远程数据库，插入 pending 订单并模拟回调，预期通过 Exit 0)*
-
-- **测试完整链路 (E2E)**:
+- **执行远端 API 冒烟测试**:
   ```bash
-  BASE_URL=https://xiaowangzi.348421501.workers.dev \
-  BUFPAY_APP_SECRET=$BUFPAY_APP_SECRET \
-  npx tsx scripts/test-bufpay-staging.ts
+  BASE_URL=https://pay-staging.wan.lat \
+  node --experimental-strip-types scripts/test-e2e-smoke.ts
   ```
-  *(注: 此脚本尝试通过 API 创建真实订单，当前已通，预期成功 Exit 0)*
-
-> **说明**: 远端 staging 不等于生产上线。这是 Cloudflare Workers 的 POC staging 环境。  
-> **APP_URL / NEXT_PUBLIC_APP_URL**: staging 环境指向 `https://xiaowangzi.348421501.workers.dev`，配置在 `wrangler.jsonc` 的 `vars` 中。
-
-
-
-### 已知限制
-
-- Cloudflare Workers 不支持完整的 Node.js API。项目使用 `nodejs_compat` 兼容性标志。
-- `node:crypto` 的某些方法需要 `nodejs_compat`（已验证通过）。
-- Workers 无文件系统访问，所有数据需通过 D1 或 KV 存储。
-- Next.js `next build` 强制 `NODE_ENV=production`。本地 POC 使用 `DATABASE_ADAPTER=mock` 强制 MockAdapter（见 `lib/db.ts` 修改）。
-
-### .dev.vars 本地开发文件
-
-本地 preview 需要的环境变量通过 `.dev.vars` 提供（不入库）。最少配置：
-
-```
-APP_ENV=preview
-DATABASE_ADAPTER=mock
-SESSION_SECRET=dev-secret
-CHAT_MIN_TOKEN_BALANCE=10000
-```
-
-> **关键**: `APP_ENV=preview` 用于标记非生产环境。Cloudflare Preview 中 Next.js 构建强制 `NODE_ENV=production`，需要通过 `APP_ENV=preview` 明确告知 `lib/db.ts`：这不是真实生产环境，允许使用 MockAdapter。
-
-如需测试真实 D1（需要完整 D1 凭据）：
-```
-CLOUDFLARE_ACCOUNT_ID=xxx
-CLOUDFLARE_DATABASE_ID=xxx
-CLOUDFLARE_API_TOKEN=xxx
-```
-
-> **注意**: `.dev.vars` 已加入 `.gitignore`，不要提交真实密钥。
 
 ---
 
-## 数据库适配器生产门禁
+## 限制与注意事项
 
-`lib/db.ts` 的 `createDatabaseAdapter()` 有严格的生产环境门禁：
-
-### 生产信号（任意一项命中代表非本地/CI）
-
-| 信号 | 来源 |
-|------|------|
-| `NODE_ENV=production` | Next.js 构建设置 |
-| `APP_ENV=production` | 显式生产标记 |
-| `DEPLOY_ENV=production` | 部署环境标记 |
-| `APP_URL` 包含 `wan.lat` | 生产域名 |
-| `NEXT_PUBLIC_APP_URL` 包含 `wan.lat` | 生产域名 |
-
-### MockAdapter 规则
-
-| 场景 | 结果 |
-|------|------|
-| 生产信号 + `DATABASE_ADAPTER=mock` | ❌ 抛出错误: "Mock database adapter is not allowed in production" |
-| 生产信号 + `APP_ENV=preview` + `DATABASE_ADAPTER=mock` | ✅ MockAdapter（preview 模式） |
-| 非生产环境 + `DATABASE_ADAPTER=mock` | ✅ MockAdapter |
-| 生产信号 + D1 凭据完整 | ✅ D1RestAdapter |
-| 生产信号 + 无 D1 凭据 | ❌ 抛出错误 |
-
-> **硬规则**: 真实生产环境**永远不允许**使用 MockAdapter，不会静默降级。
-
----
-
-## 当前默认行为
-
-1. **Agent 后端**: 当前默认使用 `LocalAgentManager`，不依赖 Hermes。
-2. **Hermes 状态**: `HermesAgentManager` 未经验证，**不要设置 `AGENT_BACKEND=hermes`**。
-3. **Web MVP 独立运行**: Web MVP 不依赖 Hermes，Hermes 不可用时仍可正常运行。
-4. **Hermes webhook**: 当 Hermes 接入时，webhook 必须携带 `HERMES_WEBHOOK_SECRET` 进行签名验证。
-
----
-
-## 注意事项
-
+- **Workers 局限性**: Workers 不支持本地文件系统写入，运行中所有数据必须存储至 D1 数据库。
+- **构建限制**: Next.js 在 `next build` 时默认为 `production` 状态。非生产环境下，可配置 `APP_ENV=preview` 和 `DATABASE_ADAPTER=mock` 来强制启用 Mock 数据库进行本地开发。
+- **数据一致性**: Cloudflare D1 作为分布式数据库，在高并发写入及后续读取之间可能存在微小的读取延迟（极短时间内的最终一致性）。在编写轮询与同步逻辑时，应进行必要的容错或短暂重试。
 - 不要在此阶段删除 `docs/DEPLOYMENT.md`（腾讯云部署文档）。
 - 不要将 Cloudflare API Token 写入文档或提交到仓库。
 - 不要记录真实 secret 值。
