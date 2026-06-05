@@ -46,15 +46,29 @@ export function validateEnv(): { missing: string[]; warnings: string[] } {
   return { missing, warnings };
 }
 
+export function getEnv(key: string, fallback: string = ''): string {
+  let value = process.env[key];
+  if (value !== undefined && value !== '') return value.trim();
+
+  // Cloudflare context binding/secret fallback
+  try {
+    const ctx = (globalThis as Record<string, unknown>)[
+      Symbol.for('__cloudflare-context__') as unknown as string
+    ] as { env?: Record<string, unknown> } | undefined;
+    const ctxVal = ctx?.env?.[key];
+    if (ctxVal !== undefined && ctxVal !== null && ctxVal !== '') {
+      return String(ctxVal).trim();
+    }
+  } catch {}
+
+  return fallback;
+}
+
 export function requireEnv(key: string): string {
-  const value = process.env[key];
+  const value = getEnv(key);
   if (!value || value.trim() === '') {
     throw new Error(`缺少必需环境变量: ${key}`);
   }
-  return value.trim();
+  return value;
 }
 
-export function getEnv(key: string, fallback: string = ''): string {
-  const value = process.env[key];
-  return value ? value.trim() : fallback;
-}

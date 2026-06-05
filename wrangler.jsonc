@@ -29,5 +29,31 @@
       "database_name": "xiaowangzi-staging",
       "database_id": "83f12b1f-885e-4616-a7ff-4016dbdacef2"
     }
-  ]
+  ],
+  "env": {
+    "production": {
+      "routes": [
+        { "pattern": "wan.lat", "custom_domain": true }
+      ],
+      "vars": {
+        "APP_ENV": "production",
+        "DEPLOY_ENV": "production",
+        "CHAT_MIN_TOKEN_BALANCE": "10000",
+        "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
+        "DEEPSEEK_MODEL": "deepseek-chat",
+        "APP_URL": "https://wan.lat",
+        "NEXT_PUBLIC_APP_URL": "https://wan.lat",
+        "BUFPAY_NOTIFY_URL": "https://wan.lat/api/pay/notify",
+        "BUFPAY_RETURN_URL": "https://wan.lat/dashboard",
+        "BUFPAY_AMOUNT_TOLERANCE_CENTS": "10"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "xiaowangzi-production",
+          "database_id": "ee33703e-f592-4baa-87e6-f0cf5b787ba5"
+        }
+      ]
+    }
+  }
 }
