@@ -1,9 +1,3 @@
-# 小王子 SoulMate / xiaowangzi 项目 生产环境观测与上线运维规范 (PRODUCTION_OBSERVABILITY)
-
-本规范定义了项目进入生产观察期后的每日巡检流程、设备保活要求、挂起订单对账审计机制以及生产环境已知未验证范围。
-
----
-
 # Hermes / Agent 架构审计与实施计划报告 (HERMES_AGENT_ARCHITECTURE)
 
 本报告针对 `xiaowangzi` (小王子) 微信陪伴机器人系统的 Hermes 消息网关与“每用户一个 Agent”的系统架构进行审计，并定义后续实施的生产级设计和 PR 路线图。
@@ -320,10 +314,10 @@ module.exports = {
 
 ## 10. 后续 PR 逐步推进路线图 (Roadmap & Gates)
 
-### PR-HERMES1：Agent profile + core document schema
-* **目标**：新建 `agent_profiles` 与 `agent_core_documents` 数据库表，并扩充 `conversations` 字段（`channel`, `external_message_id`）。
-* **安全门**：**绝对禁止**在生产或测试环境设置 `AGENT_BACKEND=hermes`。
-* **验收标准**：通过本地 wrangler d1 迁移，生成无损新表并验证字段。
+### PR-HERMES1：Agent profile + core document schema [已落地]
+* **目标**：建立 `agent_profiles`、`agent_core_documents` 与 `agent_bindings` 数据库表，并扩充 `conversations` 字段（`channel`, `external_message_id`等）。实现登录/会话初始化过程中的默认 Profile 与 Core Document 初始化。
+* **安全门**：**绝对禁止**在生产环境设置 `AGENT_BACKEND=hermes`。
+* **验收标准**：通过本地及 Staging 数据库 D1 迁移，支持 `/api/user/agent-profile` 只读数据接口，且通过 `scripts/test-agent-profile.ts` 幂等性测试。
 * **回滚方式**：运行降级 SQL 迁移删除新增列与表。
 
 ### PR-HERMES2：微信绑定生产化
