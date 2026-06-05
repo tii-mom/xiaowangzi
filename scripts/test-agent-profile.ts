@@ -15,7 +15,7 @@ const ALLOW_PRODUCTION_AGENT_TEST = process.env.ALLOW_PRODUCTION_AGENT_TEST ?? '
 // 生产安全阻断检查
 const isWanLatProduction = BASE_URL.includes('wan.lat') && !BASE_URL.includes('pay-staging.wan.lat');
 const isD1Production = D1_DATABASE === 'xiaowangzi-production';
-const isProduction = isWanLatProduction || isD1Production;
+const isProduction = isWanLatProduction || isD1Production || WRANGLER_ENV === 'production';
 
 console.log('=== Agent Profile and Core Document Test ===');
 console.log(`BASE_URL: ${BASE_URL}`);

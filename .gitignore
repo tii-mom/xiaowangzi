@@ -9,3 +9,6 @@ coverage/
 !.env.example
 .dev.vars
 cloudflare-env.d.ts
+scratch/
+pay_qr.png
+

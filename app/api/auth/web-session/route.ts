@@ -64,12 +64,6 @@ export async function POST(req: NextRequest) {
       [userId, PLANS.free_trial.tokens_amount, balanceAfter, `web-session:${userId}`],
     );
 
-    try {
-      await getAgentManager().createUserAgent(userId as number);
-    } catch {
-      // non-blocking for local_agent creation
-    }
-
     // 强要求：确保初始化用户 Primary Agent Profile，失败则直接抛出 500 阻断登录
     await ensureUserPrimaryAgentProfile(userId as number);
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { ensureUserPrimaryAgentProfile } from '@/lib/agent-profile';
 
 export async function GET(req: NextRequest) {
   try {
@@ -20,13 +21,21 @@ export async function GET(req: NextRequest) {
 
     const userId = sessions.results[0].user_id as number;
 
-    const profiles = await db.query(
+    let profiles = await db.query(
       "SELECT id, display_name, status, is_primary FROM agent_profiles WHERE user_id = ? AND is_primary = 1 AND status = 'active' LIMIT 1",
       [userId]
     );
 
     if (profiles.results.length === 0) {
-      return NextResponse.json({ error: 'Agent Profile 未初始化' }, { status: 404 });
+      // 老用户自动补偿初始化
+      await ensureUserPrimaryAgentProfile(userId);
+      profiles = await db.query(
+        "SELECT id, display_name, status, is_primary FROM agent_profiles WHERE user_id = ? AND is_primary = 1 AND status = 'active' LIMIT 1",
+        [userId]
+      );
+      if (profiles.results.length === 0) {
+        return NextResponse.json({ error: 'Agent Profile 未初始化' }, { status: 404 });
+      }
     }
 
     const profile = profiles.results[0];
