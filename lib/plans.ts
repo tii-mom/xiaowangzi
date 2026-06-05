@@ -28,6 +28,13 @@ export const PLANS: Record<string, Plan> = {
     amount_cents: 9900,
     pay_type: 'wechat',
   },
+  premium: {
+    id: 'premium',
+    name: '玫瑰星云版',
+    tokens_amount: 3000000,
+    amount_cents: 39900,
+    pay_type: 'wechat',
+  },
   staging_test_10c: {
     id: 'staging_test_10c',
     name: 'Staging Test 0.10',

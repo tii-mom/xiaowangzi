@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { getEnv } from '@/lib/env';
 
 function validateAdmin(req: NextRequest): boolean {
   const nodeEnv = process.env.NODE_ENV ?? 'development';
-  const adminToken = process.env.ADMIN_TOKEN;
+  const adminToken = getEnv('ADMIN_TOKEN');
 
   if (!adminToken || adminToken.trim() === '') {
     if (nodeEnv === 'production') {

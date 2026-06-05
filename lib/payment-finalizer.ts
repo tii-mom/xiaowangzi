@@ -172,14 +172,35 @@ async function executeRecharge(
   const tokens = order.tokens_amount as number;
   const planId = order.plan as string;
 
-  let insertLedger;
+  // Double check the ledger before proceeding to recharge
+  if (await checkTokenLedger(db, orderId)) {
+    await reconcileUserBalance(db, userId);
+    await ensureOrderPaid(db, orderId);
+    return { status: 'already_finalized' };
+  }
+
   try {
-    insertLedger = await db.execute(
-      `INSERT INTO token_ledger
-       (user_id, type, delta_tokens, balance_after, source, source_id, total_tokens, created_at)
-       VALUES (?, 'purchase', ?, 0, 'bufpay', ?, ?, datetime('now'))`,
-      [userId, tokens, orderId, tokens],
-    );
+    // We run the balance update, token ledger insert, and order status update as a single atomic batch.
+    // This ensures that if the unique constraint on token_ledger is violated (idx_token_ledger_bufpay_purchase_once),
+    // the user balance update is rolled back automatically by SQLite.
+    await db.batch([
+      {
+        sql: 'UPDATE users SET token_balance = token_balance + ?, updated_at = datetime(\'now\') WHERE id = ?',
+        params: [tokens, userId],
+      },
+      {
+        sql: `INSERT INTO token_ledger
+              (user_id, type, delta_tokens, balance_after, source, source_id, total_tokens, created_at)
+              VALUES (?, 'purchase', ?, (SELECT token_balance FROM users WHERE id = ?), 'bufpay', ?, ?, datetime('now'))`,
+        params: [userId, tokens, userId, orderId, tokens],
+      },
+      {
+        sql: `UPDATE payment_orders
+              SET status = 'paid', paid_at = datetime('now')
+              WHERE order_id = ? AND status IN ('pending', 'processing')`,
+        params: [orderId],
+      },
+    ]);
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     const exists = await checkTokenLedger(db, orderId);
@@ -191,46 +212,6 @@ async function executeRecharge(
     }
     await logSystemEvent('payment.ledger_insert_failed', { order_id: orderId, error: errorMsg });
     return { status: 'error', message: '账本写入失败' };
-  }
-
-  if ((insertLedger.meta?.changes ?? 0) === 0) {
-    await reconcileUserBalance(db, userId);
-    await ensureOrderPaid(db, orderId);
-    await logSystemEvent('payment.ledger_insert_duplicate', { order_id: orderId });
-    return { status: 'already_finalized' };
-  }
-
-  try {
-    await db.execute(
-      'UPDATE users SET token_balance = token_balance + ?, updated_at = datetime(\'now\') WHERE id = ?',
-      [tokens, userId],
-    );
-  } catch (err) {
-    await logSystemEvent('payment.balance_update_failed', {
-      order_id: orderId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    await reconcileUserBalance(db, userId);
-    return { status: 'error', message: '余额更新失败，已尝试 reconcile' };
-  }
-
-  const users = await db.query(
-    'SELECT token_balance FROM users WHERE id = ?',
-    [userId],
-  );
-  const latestBalance = (users.results[0]?.token_balance as number) ?? tokens;
-
-  try {
-    await db.execute(
-      `UPDATE token_ledger SET balance_after = ?
-       WHERE source = 'bufpay' AND source_id = ? AND type = 'purchase'`,
-      [latestBalance, orderId],
-    );
-  } catch (err) {
-    await logSystemEvent('payment.ledger_balance_after_update_failed', {
-      order_id: orderId,
-      error: err instanceof Error ? err.message : String(err),
-    });
   }
 
   try {
@@ -257,8 +238,6 @@ async function executeRecharge(
       error: err instanceof Error ? err.message : String(err),
     });
   }
-
-  await ensureOrderPaid(db, orderId);
 
   return { status: 'ok' };
 }

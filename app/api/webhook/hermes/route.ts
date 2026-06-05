@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getAgentManager } from '@/lib/agent-manager';
+import { getEnv } from '@/lib/env';
 
 function validateWebhookSecret(req: NextRequest): boolean {
   const nodeEnv = process.env.NODE_ENV ?? 'development';
-  const secret = process.env.HERMES_WEBHOOK_SECRET;
+  const secret = getEnv('HERMES_WEBHOOK_SECRET');
 
   if (!secret || secret.trim() === '') {
     if (nodeEnv === 'production') {

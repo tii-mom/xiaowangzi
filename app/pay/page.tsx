@@ -5,7 +5,15 @@ import { Sparkles, CheckCircle2 } from 'lucide-react';
 import { PLANS } from '@/lib/plans';
 
 export default function PayPage() {
-  const [plans, setPlans] = useState<typeof PLANS[string][]>([]);
+  const [plans] = useState<typeof PLANS[string][]>(() => {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? '';
+    const isProd = appUrl === 'https://wan.lat' || appUrl === 'https://www.wan.lat';
+    return Object.values(PLANS).filter((p) => {
+      if (p.id === 'free_trial') return false;
+      if (p.id === 'staging_test_10c' && isProd) return false;
+      return p.amount_cents > 0;
+    });
+  });
   const [qrImg, setQrImg] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [price, setPrice] = useState<string | null>(null);
@@ -15,15 +23,6 @@ export default function PayPage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? '';
-    const isProd = appUrl === 'https://wan.lat' || appUrl === 'https://www.wan.lat';
-    const filtered = Object.values(PLANS).filter((p) => {
-      if (p.id === 'free_trial') return false;
-      if (p.id === 'staging_test_10c' && isProd) return false;
-      return p.amount_cents > 0;
-    });
-    setPlans(filtered);
-
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
