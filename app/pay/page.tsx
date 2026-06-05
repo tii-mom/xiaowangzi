@@ -16,7 +16,7 @@ export default function PayPage() {
 
   useEffect(() => {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? '';
-    const isProd = appUrl.includes('wan.lat') && !appUrl.includes('staging');
+    const isProd = appUrl === 'https://wan.lat' || appUrl === 'https://www.wan.lat';
     const filtered = Object.values(PLANS).filter((p) => {
       if (p.id === 'free_trial') return false;
       if (p.id === 'staging_test_10c' && isProd) return false;

@@ -13,7 +13,8 @@ async function handlePing(req: NextRequest) {
   const appEnv = process.env.APP_ENV;
   const deployEnv = process.env.DEPLOY_ENV;
   const appUrl = process.env.APP_URL ?? '';
-  const isProduction = appEnv === 'production' || deployEnv === 'production' || appUrl.includes('wan.lat');
+  const isWanLatProduction = appUrl === 'https://wan.lat' || appUrl === 'https://www.wan.lat';
+  const isProduction = appEnv === 'production' || deployEnv === 'production' || isWanLatProduction;
 
   // 生产环境返回 403
   if (isProduction) {

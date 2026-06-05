@@ -145,73 +145,40 @@ npx wrangler secret put ADMIN_TOKEN
 npx wrangler deploy --var APP_URL:https://wan.lat
 ```
 
-或使用 `wrangler.jsonc` 中的 `vars` 字段（仅适用于非敏感变量）。
-
-> **禁止**: 不要将真实密钥、token、secret 写入 `.env`、`wrangler.jsonc`、或提交到 git。
-
----
-
-## 命令
-
-### 本地预览
-
-```bash
-npm run cf:preview
-```
-
-这将构建 Cloudflare Workers 版本并启动本地预览服务器。
-
-### E2E Smoke 测试
-
-```bash
-BASE_URL=<cf-preview-url> npx tsx scripts/test-e2e-smoke.ts
-```
-
-### 部署
-
-```bash
-npm run cf:deploy
-```
-
-部署前需配置远端 secrets：
-
-```bash
-npx wrangler secret put SESSION_SECRET
-npx wrangler secret put ADMIN_TOKEN
-npx wrangler secret put DEEPSEEK_API_KEY
-npx wrangler secret put HERMES_WEBHOOK_SECRET
-```
-
-`wrangler.jsonc` 中的 `vars` 字段已包含 staging 默认值（APP_ENV, DEPLOY_ENV, CHAT_MIN_TOKEN_BALANCE 等）。
-
-### TypeScript 类型生成
-
-```bash
-npm run cf:typegen
-```
-
-生成 `cloudflare-env.d.ts`，提供 Cloudflare Workers 环境变量类型提示。
-
----
-
-## 回滚方式
-
-1. **Cloudflare Workers 历史版本回滚**：在 Cloudflare Dashboard → Workers & Pages → xiaowangzi → Deployments → 选择历史版本回滚。
-2. **重新部署上一个 commit**：`git checkout <previous-commit> && npm run cf:deploy`
-
----
-
-## Workers Runtime 兼容性
-
-### 未验证项汇总（PR-CF4c 状态）
+或使用 `wrangler.jsonc` 中的 `vars` 字段（仅适用于�### 未验证项汇总（PR-CF4c 状态）
 
 | 功能 | 状态 | 备注 |
 |------|------|------|
 | **HermesAgentManager** | ⏭️ 未验证 | Hermes 微信机器人仍未验证，不可设置 `AGENT_BACKEND=hermes` |
-| **BufPay 真实扫码支付**| ✅ 已验证 | 微信与支付宝真实扫码扣款已通过测试（见下方详情） |
+| **BufPay 真实扫码支付**| ❌ 未通过 | 真实扫码已付，但自动 notify 受阻 (599 报错) |
 
 ### 💡 BufPay 接口对接说明
 * **创单接口返回**: 官方 `create-order` 接口原生支持并返回 JSON。当前实现显式传入 `format=json` 传参，旨在避免部分特定场景或后台设置下返回收银台 HTML 页面，提高兼容性。业务解析仍严格基于官方返回的 JSON 字段 `status`、`aoid`、`qr`、`qr_img`、`qr_price` 进行。
+
+### Staging 验证结果 (PR-CF4c — 真实扫码支付联调状态)
+
+> **验证日期**: 2026-06-05  
+> **Staging URL**: `https://xiaowangzi.348421501.workers.dev` (待切 pay-staging.wan.lat)  
+> **D1 binding**: `DB` (xiaowangzi-staging, D1BindingAdapter)
+
+#### 1. 真实扫码与技术闭环验证状态
+* **真实扫码扣款**: ✅ 已验证。微信和支付宝均已完成 0.10 元真实扣款到账。
+* **BufPay 官方 query 状态**: **`payed`**。代表 BufPay 平台已识别支付成功，但回调我方 notify_url 遭遇失败。
+* **BufPay 自动 notify**: ❌ **未通过**。自动回调 notify_url 失败并由 Cloudflare 边缘端返回了 HTTP 599 报错。
+* **手动 curl notify**: ✅ **通过**。仅证明业务代码逻辑、D1 记账模块、签名验签公式 100% 正确可用，不能代表自动回调成功。
+* **D1 自动入账**: ❌ **未通过**（此前入账由手动模拟触发，若自动 notify 未跑通，不算自动入账）。
+* **完整真实支付闭环**: ❌ **未通过**。目前仍被 599 回调网络问题阻断。
+* **PR-CF5 推进状态**: ❌ **Blocked**。保持阻断状态，禁止进入生产发布。
+
+#### 2. 测试套餐生产隔离设计 (staging_test_10c)
+为保障生产安全，测试套餐 `staging_test_10c`（0.10 元）有严格的生产隔离：
+* **API 隔离**: 接口 `/api/pay/create-order` 会校验 `APP_ENV`、`DEPLOY_ENV` 与 `APP_URL`。若判定处于生产环境（严格等于 `https://wan.lat` 或 `https://www.wan.lat`），将直接返回 400 拦截创单。
+* **前端隔离**: `PayPage` 前端页面在检测到 `NEXT_PUBLIC_APP_URL` 严格等于 `https://wan.lat` 或 `https://www.wan.lat` 时，会自动过滤并彻底隐藏 `staging_test_10c` 套餐，防止生产环境展示。
+
+#### 3. 未验证与待解决项
+* **Cloudflare Edge 绕过 / WAF 放行**: 需要排查 WAF 安全拦截日志，并在 Cloudflare 为 `/api/pay/notify` 增加 Skip 安全规则。
+* **自定义 staging 域名可达性**: 绑定 `pay-staging.wan.lat` 自定义子域名至 Cloudflare Worker 并在 `wrangler.jsonc` 中作为 `BUFPAY_NOTIFY_URL`，以规避国内对 `*.workers.dev` 的网络访问污染。
+* **重新扫码 E2E 测试**: 回调通畅后，必须重新测试微信与支付宝各一笔 0.10 元扣款，要求 BufPay 官方状态自动转为 `success`，本地自动变为 `paid` 并完成充值记账。t=json` 传参，旨在避免部分特定场景或后台设置下返回收银台 HTML 页面，提高兼容性。业务解析仍严格基于官方返回的 JSON 字段 `status`、`aoid`、`qr`、`qr_img`、`qr_price` 进行。
 
 ### Staging 验证结果 (PR-CF4c — 真实扫码支付与技术闭环)
 
