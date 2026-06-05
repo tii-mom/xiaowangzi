@@ -210,6 +210,9 @@ npm run cf:typegen
 | **HermesAgentManager** | ⏭️ 未验证 | Hermes 微信机器人仍未验证，不可设置 `AGENT_BACKEND=hermes` |
 | **BufPay 真实扫码支付**| ✅ 已验证 | 微信与支付宝真实扫码扣款已通过测试（见下方详情） |
 
+### 💡 BufPay 接口对接说明
+* **创单接口返回**: 官方 `create-order` 接口原生支持并返回 JSON。当前实现显式传入 `format=json` 传参，旨在避免部分特定场景或后台设置下返回收银台 HTML 页面，提高兼容性。业务解析仍严格基于官方返回的 JSON 字段 `status`、`aoid`、`qr`、`qr_img`、`qr_price` 进行。
+
 ### Staging 验证结果 (PR-CF4c — 真实扫码支付与技术闭环)
 
 > **验证日期**: 2026-06-04  

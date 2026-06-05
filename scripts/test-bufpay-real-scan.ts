@@ -4,10 +4,9 @@
  * 运行流程:
  * 1. 登录获取 session
  * 2. POST /api/pay/create-order 创建 staging_test_10c 测试订单
- * 3. 将返回的 base64 支付二维码写入本地文件 pay_qr.png，并输出可点击的文件链接
- * 4. 进入轮询状态 (每 3 秒查询一次订单状态，最长等待 5 分钟)
- * 5. 用户用手机扫码支付
- * 6. 自动监听到账并完成记账结算验证
+ * 3. 提取 qr_img 二维码图片，并在控制台显示 qr 二维码内容 (QR payload)
+ * 4. 轮询本地与 BufPay 官方接口以获取订单最新状态，并进行根因判断
+ * 5. 自动监听到账后验证本地数据库 D1 的记账与订阅激活状态
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -45,6 +44,17 @@ async function request(pathStr: string, init: RequestInit & { cookie?: string } 
     body = text;
   }
   return { status: res.status, body, headers: res.headers };
+}
+
+async function queryBufPayOfficial(aoid: string): Promise<string> {
+  try {
+    const res = await fetch(`https://bufpay.com/api/query/${aoid}`);
+    if (!res.ok) return `HTTP_${res.status}`;
+    const data = await res.json() as { status: string };
+    return data.status;
+  } catch (err) {
+    return `ERROR: ${err instanceof Error ? err.message : String(err)}`;
+  }
 }
 
 async function main() {
@@ -90,13 +100,19 @@ async function main() {
   const aoid = coBody.aoid as string;
   const price = coBody.price as string;
   const qrImg = coBody.qr_img as string; // Base64
-  const qrUrl = coBody.qr as string; // 支付 URL
-  const expires = coBody.expires_in as number;
+  const qrUrl = coBody.qr as string; // 二维码内容
+  const qrPrice = coBody.qr_price as string | undefined;
 
-  assert(typeof orderId === 'string' && orderId.length > 0, `生成系统订单号: ${orderId}`);
-  assert(typeof aoid === 'string' && aoid.length > 0, `获取 BufPay 订单号 (aoid)`);
+  assert(typeof orderId === 'string' && orderId.length > 0, `生成系统订单号 (order_id): ${orderId}`);
+  assert(typeof aoid === 'string' && aoid.length > 0, `获取 BufPay 订单号 (aoid): ${aoid}`);
   assert(typeof price === 'string' && price.length > 0, `支付金额: ${price} 元`);
   
+  if (!qrPrice || qrPrice.trim() === '') {
+    console.log(`  👉 提示: 该订单使用不固定金额二维码，用户需输入 price 的真实金额 (${price} 元)。`);
+  } else {
+    console.log(`  👉 提示: 该订单使用固定金额二维码，实际支付金额为 ${qrPrice} 元。`);
+  }
+
   // ---- 3. 二维码本地提取与展示 ----
   console.log('\n=== 3. 提取支付二维码 ===');
   if (qrImg && qrImg.includes('base64,')) {
@@ -104,10 +120,10 @@ async function main() {
     const qrBuffer = Buffer.from(base64Data, 'base64');
     const qrPath = path.resolve(process.cwd(), 'pay_qr.png');
     fs.writeFileSync(qrPath, qrBuffer);
-    console.log(`  🎉 支付二维码已保存至本地:`);
+    console.log(`  🎉 二维码图片已保存至本地:`);
     console.log(`  👉 [点击打开二维码图片](file://${qrPath}) 👈`);
   } else {
-    console.log(`  ⚠️ 未获取到 Base64 图片，可直接使用支付链接进行测试。`);
+    console.log(`  ⚠️ 未获取到 Base64 图片。`);
   }
   if (qrUrl) {
     console.log(`  👉 二维码内容 / QR payload: ${qrUrl}`);
@@ -118,34 +134,62 @@ async function main() {
   console.log('  请在手机上使用微信/支付宝扫码，支付成功后系统将自动监听到账并推进。');
 
   const maxWaitMs = 5 * 60 * 1000;
-  const pollIntervalMs = 3000;
+  const pollIntervalMs = 4000;
   const startTime = Date.now();
   let paidSuccessfully = false;
+  let lastOfficialStatus = '';
 
   while (Date.now() - startTime < maxWaitMs) {
     const elapsed = Math.round((Date.now() - startTime) / 1000);
-    process.stdout.write(`\r  ⌛ 正在轮询订单状态... 已等待 ${elapsed} 秒 / 300 秒`);
     
+    // 查询 BufPay 官方状态
+    const officialStatus = await queryBufPayOfficial(aoid);
+    if (officialStatus !== lastOfficialStatus) {
+      console.log(`\n  📢 [BufPay 官方状态变更]: ${lastOfficialStatus || 'None'} ➔ ${officialStatus}`);
+      lastOfficialStatus = officialStatus;
+      
+      if (officialStatus === 'new') {
+        console.log('     💡 提示: 订单为新建状态，BufPay 平台尚未识别到支付。请确认安卓手机 BufPay App 是否正常保活并获得通知权限。');
+      } else if (officialStatus === 'payed') {
+        console.log('     💡 警告: 订单已支付但回调 notify_url 失败（即 599 阻断）。请排查 Cloudflare WAF/网络拦截，不要手动 curl 入账。');
+      } else if (officialStatus === 'success') {
+        console.log('     🎉 提示: BufPay 官方标记自动 notify 成功！');
+      } else if (officialStatus === 'expire') {
+        console.log('     ❌ 提示: 订单在 BufPay 平台已过期。');
+      } else if (officialStatus === 'fee_error') {
+        console.log('     ❌ 提示: 账户余额不足扣手续费导致回调失败。');
+      }
+    }
+
+    process.stdout.write(`\r  ⌛ 正在轮询。已等 ${elapsed}秒 / 官方状态: ${officialStatus} / 本地状态: 正在查询...`);
+
+    // 查询本地数据库状态
     const query = await request(`/api/pay/query?order_id=${orderId}`, { cookie: authCookie });
+    let localStatus = 'unknown';
     if (query.status === 200) {
       const qBody = query.body as Record<string, unknown>;
-      if (qBody.status === 'paid') {
+      localStatus = qBody.status as string;
+      if (localStatus === 'paid') {
         paidSuccessfully = true;
-        console.log('\n\n  🎉 检测到订单已支付成功!');
+        console.log('\n\n  🎉 本地检测到订单已支付并正确记账成功!');
         break;
       }
     }
+    
+    process.stdout.write(`\r  ⌛ 正在轮询。已等 ${elapsed}秒 / 官方状态: ${officialStatus} / 本地状态: ${localStatus}`);
+
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
 
   if (!paidSuccessfully) {
-    console.error('\n\n❌ 验证超时失败：未能检测到支付到账。');
+    console.error('\n\n❌ 验证超时失败：未能检测到本地订单状态自动更新为 paid。');
     console.error('\n🔍 排查提示:');
-    console.error('  1. 请检查安卓手机上的 BufPay 监听 App 是否在线且运行正常。');
-    console.error('  2. 确认手机的微信/支付宝到账通知开启（有横幅或语音提示）。');
-    console.error('  3. 确认手机去除了电池优化，确保后台保活正常。');
-    console.error('  4. 检查 BufPay 平台后台订单列表中该笔订单是否显示已支付。');
-    console.error('  5. 登录 Cloudflare Logs，检查 `/api/pay/notify` 是否收到了 webhook 回调及其响应。');
+    console.error(`  1. 当前 BufPay 官方的最后状态为: ${lastOfficialStatus}`);
+    if (lastOfficialStatus === 'new') {
+      console.error('     - 请务必检查收款安卓手机的 BufPay 监听 App 是否在线，通知读取与保活是否正常。');
+    } else if (lastOfficialStatus === 'payed') {
+      console.error('     - 100% 确认是 Webhook 回调受阻！请检查 Cloudflare 侧 WAF 防火墙拦截记录或临时换用 staging.wan.lat 自定义域名。');
+    }
     process.exit(1);
   }
 
