@@ -145,7 +145,7 @@ npx wrangler secret put ADMIN_TOKEN
 npx wrangler deploy --var APP_URL:https://wan.lat
 ```
 
-或使用 `wrangler.jsonc` 中的 `vars` 字段（仅适用于�### 未验证项汇总（PR-CF4c 状态）
+或使用 `wrangler.jsonc` 中的 `vars` 字段（仅适用于�### 未验证项汇总（PR-CF4c 状态）
 
 | 功能 | 状态 | 备注 |
 |------|------|------|
@@ -162,13 +162,13 @@ npx wrangler deploy --var APP_URL:https://wan.lat
 > **D1 binding**: `DB` (xiaowangzi-staging, D1BindingAdapter)
 
 #### 1. 真实扫码与技术闭环验证状态
-* **真实扫码扣款**: ✅ 已验证。微信和支付宝均已完成 0.10 元真实扣款到账。
-* **BufPay 官方 query 状态**: **`payed`**。代表 BufPay 平台已识别支付成功，但回调我方 notify_url 遭遇失败。
-* **BufPay 自动 notify**: ❌ **未通过**。自动回调 notify_url 失败并由 Cloudflare 边缘端返回了 HTTP 599 报错。
-* **手动 curl notify**: ✅ **通过**。仅证明业务代码逻辑、D1 记账模块、签名验签公式 100% 正确可用，不能代表自动回调成功。
-* **D1 自动入账**: ❌ **未通过**（此前入账由手动模拟触发，若自动 notify 未跑通，不算自动入账）。
-* **完整真实支付闭环**: ❌ **未通过**。目前仍被 599 回调网络问题阻断。
-* **PR-CF5 推进状态**: ❌ **Blocked**。保持阻断状态，禁止进入生产发布。
+* **真实扫码扣款**: ✅ 已验证，微信和支付宝均到账
+* **BufPay 官方 query**: `payed`
+* **BufPay 自动 notify**: ❌ 未通过，HTTP 599
+* **手动 curl notify**: ✅ 通过，仅证明业务逻辑可用
+* **D1 入账**: 如果由手动 curl 触发，不能算自动 notify 入账
+* **完整真实支付闭环**: ❌ 未通过
+* **PR-CF5**: blocked
 
 #### 2. 测试套餐生产隔离设计 (staging_test_10c)
 为保障生产安全，测试套餐 `staging_test_10c`（0.10 元）有严格的生产隔离：
