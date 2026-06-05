@@ -2,13 +2,54 @@
  * E2E Concurrency Race and Idempotency Test for Payment Callback
  *
  * Runs natively on Node.js without external dependencies like tsx/ts-node.
- * Uses wrangler CLI to execute queries on the remote D1 production database.
+ * Uses wrangler CLI to execute queries on D1 database.
  */
 import crypto from 'node:crypto';
 import { execSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
-const BASE_URL = process.env.BASE_URL ?? 'https://wan.lat';
+// Load environmental vars from .dev.vars if needed
+try {
+  const devVarsPath = path.resolve(process.cwd(), '.dev.vars');
+  if (fs.existsSync(devVarsPath)) {
+    const content = fs.readFileSync(devVarsPath, 'utf8');
+    for (const line of content.split('\n')) {
+      const match = line.match(/^\s*([\w.\-]+)\s*=\s*(.*)?\s*$/);
+      if (match) {
+        const key = match[1];
+        let value = match[2] ?? '';
+        if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+        if (!process.env[key]) process.env[key] = value;
+      }
+    }
+  }
+} catch {}
+
+const BASE_URL = process.env.BASE_URL ?? 'https://pay-staging.wan.lat';
 const BUFPAY_APP_SECRET = process.env.BUFPAY_APP_SECRET ?? '';
+const D1_DATABASE = process.env.D1_DATABASE ?? 'xiaowangzi-staging';
+const WRANGLER_ENV = process.env.WRANGLER_ENV ?? '';
+const ALLOW_PRODUCTION_RACE_TEST = process.env.ALLOW_PRODUCTION_RACE_TEST ?? '';
+
+// Determine production mode
+const isWanLatProduction = BASE_URL.includes('wan.lat') && !BASE_URL.includes('pay-staging.wan.lat');
+const isD1Production = D1_DATABASE === 'xiaowangzi-production';
+const isWranglerProduction = WRANGLER_ENV === 'production';
+const isProductionMode = isWanLatProduction || isD1Production || isWranglerProduction;
+
+console.log('=== Payment Idempotency Race Test (Native Node) ===\n');
+console.log(`BASE_URL: ${BASE_URL}`);
+console.log(`D1_DATABASE: ${D1_DATABASE}`);
+console.log(`WRANGLER_ENV: ${WRANGLER_ENV || '(empty)'}`);
+console.log(`Production Mode: ${isProductionMode ? 'YES ⚠️' : 'NO'}`);
+console.log(`ALLOW_PRODUCTION_RACE_TEST: ${ALLOW_PRODUCTION_RACE_TEST || '(empty)'}`);
+
+if (isProductionMode && ALLOW_PRODUCTION_RACE_TEST !== 'YES_I_UNDERSTAND') {
+  console.error('\n❌ ERROR: Production mode detected but ALLOW_PRODUCTION_RACE_TEST !== "YES_I_UNDERSTAND"');
+  console.error('Abort execution to prevent modifying production data.');
+  process.exit(1);
+}
 
 let failures = 0;
 
@@ -27,7 +68,8 @@ function md5Sign(...parts: string[]): string {
 
 function d1Execute(sql: string): any {
   // Execute via wrangler CLI
-  const cmd = `npx wrangler d1 execute xiaowangzi-production --remote --env production --json --command "${sql.replace(/"/g, '\\"')}"`;
+  const envFlag = WRANGLER_ENV ? `--env ${WRANGLER_ENV}` : '';
+  const cmd = `npx wrangler d1 execute ${D1_DATABASE} --remote ${envFlag} --json --command "${sql.replace(/"/g, '\\"')}"`;
   const stdout = execSync(cmd, { encoding: 'utf8' });
   const data = JSON.parse(stdout);
   return data[0];
@@ -53,9 +95,6 @@ async function request(pathStr: string, init: RequestInit & { cookie?: string } 
 }
 
 async function main() {
-  console.log('=== Payment Idempotency Race Test (Native Node) ===\n');
-  console.log(`BASE_URL: ${BASE_URL}`);
-
   if (!BUFPAY_APP_SECRET || BUFPAY_APP_SECRET === 'test_secret') {
     console.error('❌ Error: BUFPAY_APP_SECRET env is required.');
     process.exit(1);
@@ -77,10 +116,10 @@ async function main() {
   const ts = Date.now();
   const orderId = `wxz_race_test_${ts}`;
   const aoid = `aoid_race_${ts}`;
-  const planId = 'monthly';
-  const priceYuan = '29.00';
-  const amountCents = 2900;
-  const tokensAmount = 100000;
+  const planId = isProductionMode ? 'monthly' : 'staging_test_10c';
+  const priceYuan = isProductionMode ? '29.00' : '0.10';
+  const amountCents = isProductionMode ? 2900 : 10;
+  const tokensAmount = isProductionMode ? 100000 : 100;
 
   d1Execute(
     `INSERT INTO payment_orders (user_id, order_id, bufpay_aoid, plan, tokens_amount, amount_cents, pay_type, status) VALUES (${userId}, '${orderId}', '${aoid}', '${planId}', ${tokensAmount}, ${amountCents}, 'wechat', 'pending');`

@@ -129,6 +129,29 @@ BASE_URL=https://wan.lat DEEPSEEK_API_KEY=true ADMIN_TOKEN=<NEW_ADMIN_TOKEN> nod
 
 ---
 
+## 8.5 支付高并发防重测试步骤 (Payment Idempotency Race Test)
+
+为确保并发 notify 回调不会导致重复入账，项目提供了并发测试脚本 `scripts/test-payment-idempotency-race.ts`。
+
+### 8.5.1 安全机制与默认运行
+为了防止在生产环境误执行测试，该脚本具有硬安全保护：
+- **安全默认**: 默认情况下，`BASE_URL` 会使用 Staging 环境 (`https://pay-staging.wan.lat`)，`D1_DATABASE` 默认使用 `xiaowangzi-staging`。
+- **并发数量**: 脚本会并发发送 10 个相同的支付 Webhook 回调，自动验证订单状态转为 `paid` 且 `token_ledger` 仅保留有 1 笔 purchase 流水。
+
+### 8.5.2 生产环境并发测试 (需显式授权)
+在生产环境的测试会产生测试订单和 ledger，**严禁常规运行**。仅限在上线验收窗口期由项目负责人显式授权并运行：
+```bash
+ALLOW_PRODUCTION_RACE_TEST=YES_I_UNDERSTAND \
+BASE_URL=https://wan.lat \
+D1_DATABASE=xiaowangzi-production \
+WRANGLER_ENV=production \
+BUFPAY_APP_SECRET=<本地密钥值> \
+node --experimental-strip-types scripts/test-payment-idempotency-race.ts
+```
+如果检测到 `wan.lat` 生产环境但缺少 `ALLOW_PRODUCTION_RACE_TEST=YES_I_UNDERSTAND`，脚本将自动强阻断并报错退出。
+
+---
+
 ## 9. 测试套餐生产禁用验证 (Staging Plan Block Verify)
 
 测试套餐 `staging_test_10c` 绝对禁止在生产环境被使用。
@@ -198,16 +221,17 @@ fetch('https://wan.lat/api/pay/create-order', {
      raw_notify_json: 'manual_reconciled'
    });
    ```
-### 12.4 生产测试数据手动修正与审计记录
-对于在测试/试运行期间的任何手动数据订正（如对于 user_id=7 出现的并发重复加币进行手动轧差对齐），**绝对禁止直接后台修改 users.token_balance 且不做记录**。
-
-必须遵循以下规范：
-1. 使用安全对齐 SQL（如 `UPDATE users SET token_balance = (SELECT SUM(delta_tokens) FROM token_ledger WHERE user_id = X) WHERE id = X;`）使余额与账本保持一致。
-2. 必须向 `admin_audit_logs` 数据库表中插入对应的操作审计日志，说明原因和操作人，供后期财务和安全审计备查。例如：
-   ```sql
-   INSERT INTO admin_audit_logs (admin_email, action, target_type, target_id, details)
-   VALUES ('ops@wan.lat', 'recalibrate_user_balance', 'user', '7', 'Recalibrate user 7 balance due to concurrency race condition: reset balance to 110000 tokens matching token_ledger sum.');
-   ```
+### 12.4 生产测试数据与正式用户手动修正与审计记录
+- **生产正式用户余额修正绝对不能常规使用 SQL 粗暴修改**。任何直接的 `users.token_balance += X` 绕过 `token_ledger` 均属于严重账目合规问题。
+- **SQL recalibrate 仅允许做为灾难/事故后的紧急处置路径**。如果必须在生产环境运行 SQL 来订正余额或轧差（如测试或试运行期间对 user_id=7 出现的并发重复加币进行手动轧差对齐），必须严格遵守以下操作协议：
+  1. **先备份**: 在操作 D1 之前，必须在 Cloudflare 控制台先手动创建一个 D1 数据库快照备份。
+  2. **记录操作者与原因**: 严禁匿名修改，所有订正行为必须记录详细的责任人、订正单号。
+  3. **强制审计**: 必须向 `admin_audit_logs` 数据库表中插入对应的操作审计日志，说明原因和操作人，供后期财务和安全审计备查。例如：
+     ```sql
+     INSERT INTO admin_audit_logs (admin_email, action, target_type, target_id, details)
+     VALUES ('ops@wan.lat', 'recalibrate_user_balance', 'user', '7', 'Recalibrate user 7 balance due to concurrency race condition: reset balance to 110000 tokens matching token_ledger sum.');
+     ```
+  4. **优先使用脚本**: 优先使用 finalizer 回调重放或专门的 reconcile 脚本进行余额轧差，禁止在不更新 `token_ledger` 的情况下单方面更新 `users.token_balance`。
 
 ---
 
