@@ -162,13 +162,13 @@ npx wrangler deploy --var APP_URL:https://wan.lat
 > **D1 binding**: `DB` (xiaowangzi-staging, D1BindingAdapter)
 
 #### 1. 真实扫码与技术闭环验证状态
-* **真实扫码扣款**: ✅ 已验证，微信和支付宝均到账
-* **BufPay 官方 query**: `payed`
-* **BufPay 自动 notify**: ❌ 未通过，HTTP 599
-* **手动 curl notify**: ✅ 通过，仅证明业务逻辑可用
-* **D1 入账**: 如果由手动 curl 触发，不能算自动 notify 入账
-* **完整真实支付闭环**: ❌ 未通过
-* **PR-CF5**: blocked
+* **真实扫码扣款**: ✅ 已验证，微信和支付宝均到账，真实支付 0.10 元
+* **BufPay 官方 query**: `success` (自动回调成功)
+* **BufPay 自动 notify**: ✅ 已通过，使用自定义域名 `pay-staging.wan.lat` 配合 CF WAF 放行跳过 Bot Fight Mode/BIC，状态码 200 OK
+* **手动 curl notify**: 不需要手动模拟，自动回调链路已跑通
+* **D1 入账**: ✅ 已通过，自动对账入库
+* **完整真实支付闭环**: ✅ 已通过
+* **PR-CF5**: ✅ Ready
 
 #### 2. 测试套餐生产隔离设计 (staging_test_10c)
 为保障生产安全，测试套餐 `staging_test_10c`（0.10 元）有严格的生产隔离：
