@@ -1,4 +1,4 @@
-# Coder Pay / 小王子项目 生产环境运维日报模板 (PRODUCTION_DAILY_REPORT_TEMPLATE)
+# 小王子 SoulMate / xiaowangzi 项目 生产环境运维日报模板 (PRODUCTION_DAILY_REPORT_TEMPLATE)
 
 值班运维人员需在每日下班前，根据生产监控看板和巡检脚本输出，填写本篇日报并同步至团队。
 

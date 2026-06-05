@@ -10,7 +10,33 @@ import { execSync } from 'node:child_process';
 const D1_DATABASE = process.env.D1_DATABASE ?? 'xiaowangzi-production';
 const WRANGLER_ENV = process.env.WRANGLER_ENV ?? 'production';
 
+let failures = 0;
+
+function checkSqlSafety(sql: string) {
+  const trimmed = sql.trim().toUpperCase();
+  if (!trimmed.startsWith('SELECT') && !trimmed.startsWith('WITH')) {
+    console.error(`❌ SQL 安全保护阻断: 仅允许 SELECT 或 WITH 开头的查询。当前 SQL: "${sql}"`);
+    process.exit(1);
+  }
+
+  const forbidden = [
+    'UPDATE', 'INSERT', 'DELETE', 'DROP', 'ALTER', 
+    'CREATE', 'REPLACE', 'TRUNCATE', 'PRAGMA', 'VACUUM'
+  ];
+
+  for (const keyword of forbidden) {
+    const regex = new RegExp(`\\b${keyword}\\b`, 'i');
+    if (regex.test(sql)) {
+      console.error(`❌ SQL 安全保护阻断: 含有禁止使用的 SQL 关键字 [${keyword}]。当前 SQL: "${sql}"`);
+      process.exit(1);
+    }
+  }
+}
+
 function d1Execute(sql: string): any {
+  // 严格执行只读保护校验
+  checkSqlSafety(sql);
+
   const envFlag = WRANGLER_ENV ? `--env ${WRANGLER_ENV}` : '';
   const cmd = `npx wrangler d1 execute ${D1_DATABASE} --remote ${envFlag} --json --command "${sql.replace(/"/g, '\\"')}"`;
   
@@ -20,7 +46,8 @@ function d1Execute(sql: string): any {
     return data[0];
   } catch (error) {
     console.error(`❌ 执行 D1 命令失败:`, (error as Error).message);
-    process.exit(1);
+    failures++;
+    return null;
   }
 }
 
@@ -39,11 +66,16 @@ async function main() {
 
   // 2. pending 超过 10 分钟的订单数量
   console.log('--- 2. 挂起 (pending) 超过 10 分钟的订单数量 ---');
-  // SQLite 使用 UTC 时间，检查 datetime('now', '-10 minutes')
   const pendingQuery = `SELECT COUNT(*) as count FROM payment_orders WHERE status = 'pending' AND created_at < datetime('now', '-10 minutes');`;
   const pendingResult = d1Execute(pendingQuery);
   const pendingCount = pendingResult?.results?.[0]?.count ?? 0;
-  console.log(`超过 10 分钟仍处于 pending 的订单数: ${pendingCount}\n`);
+  console.log(`超过 10 分钟仍处于 pending 的订单数: ${pendingCount}`);
+  if (pendingCount > 0) {
+    console.error(`❌ 发现挂起超过 10 分钟的订单！(数量: ${pendingCount})`);
+    failures++;
+  } else {
+    console.log('✅ 无超时挂起订单。\n');
+  }
 
   // 3. token_ledger 与 users.token_balance 是否存在明显不一致
   console.log('--- 3. 账本一致性校对 (token_ledger vs users.token_balance) ---');
@@ -60,14 +92,15 @@ async function main() {
   `;
   const auditResult = d1Execute(auditQuery);
   if (auditResult?.results && auditResult.results.length > 0) {
-    console.error('⚠️  警告: 发现账本不一致的用户！');
+    console.error('❌ 错误: 发现账本不一致的用户！');
     console.table(auditResult.results);
+    failures++;
   } else {
     console.log('✅ 账本校验一致：所有用户的余额与 Token 账本流水总和完全对齐。\n');
   }
 
   // 4. 最近 system_events 是否有 payment / webhook / error 相关异常
-  console.log('--- 4. 最近支付、Webhook 或错误相关系统日志 (system_events) ---');
+  console.log('--- 4. 最近系统事件及异常排查 (system_events) ---');
   const eventsQuery = `
     SELECT id, type, created_at 
     FROM system_events 
@@ -79,11 +112,29 @@ async function main() {
   if (eventsResult?.results && eventsResult.results.length > 0) {
     console.table(eventsResult.results);
   } else {
-    console.log('暂无相关系统日志\n');
+    console.log('暂无相关事件日志\n');
   }
 
-  // 5. admin_audit_logs 最近记录
-  console.log('--- 5. 最近管理员操作审计日志 (admin_audit_logs) ---');
+  // 4.5 检查是否存在关键错误日志
+  const errorEventQuery = `
+    SELECT COUNT(*) as count 
+    FROM system_events 
+    WHERE type LIKE '%error%' 
+       OR type LIKE '%failed%' 
+       OR type LIKE '%balance_update_failed%' 
+       OR type LIKE '%subscription_update_failed%';
+  `;
+  const errorEventResult = d1Execute(errorEventQuery);
+  const errorCount = errorEventResult?.results?.[0]?.count ?? 0;
+  if (errorCount > 0) {
+    console.error(`❌ 错误: 在 system_events 中发现 ${errorCount} 条异常/失败日志！`);
+    failures++;
+  } else {
+    console.log('✅ system_events 中未检测到相关错误事件。\n');
+  }
+
+  // 5. admin_audit_logs 最近记录 (只展示，不作为失败)
+  console.log('--- 5. 最近管理员操作审计日志 (admin_audit_logs - 只展示) ---');
   const auditLogsQuery = `
     SELECT id, admin_email, action, target_type, target_id, created_at 
     FROM admin_audit_logs 
@@ -107,7 +158,8 @@ async function main() {
     console.log('暂无活动订阅\n');
   }
 
-  console.log('=== 巡检脚本执行完毕 ===');
+  console.log(`\n=== D1 巡检结束: ${failures === 0 ? 'PASS (全部通过 ✅)' : 'FAIL (存在失败项 ❌)'} ===`);
+  process.exit(failures === 0 ? 0 : 1);
 }
 
 main().catch((e) => {

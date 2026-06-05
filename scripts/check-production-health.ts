@@ -61,16 +61,17 @@ async function main() {
   console.log('\n5. 检查支付页面内容');
   const payHtml = await checkUrlStatus('/pay');
   if (payHtml) {
-    // 应当包含正式套餐金额
-    assert(payHtml.includes('29'), `包含 29 元月套餐说明`);
-    assert(payHtml.includes('99'), `包含 99 元季度套餐说明`);
-    assert(payHtml.includes('399'), `包含 399 元年套餐说明`);
+    // 应当包含正式套餐名称与金额
+    assert(payHtml.includes('29') && payHtml.includes('月光陪伴版'), `包含 29 元月光陪伴版套餐说明`);
+    assert(payHtml.includes('99') && payHtml.includes('星球成长版'), `包含 99 元星球成长版套餐说明`);
+    assert(payHtml.includes('399') && payHtml.includes('玫瑰星云版'), `包含 399 元玫瑰星云版 / premium 套餐`);
 
-    // 不应包含测试套餐/余额/钱包字样
+    // 不应包含测试及未上线特性
     assert(!payHtml.includes('staging_test_10c'), `不应包含 staging_test_10c`);
     assert(!payHtml.includes('0.10') && !payHtml.includes('0.1'), `不应包含 0.10 元测试价格`);
     assert(!payHtml.includes('Wallet'), `不应包含 Wallet`);
     assert(!payHtml.includes('Balance'), `不应包含 Balance`);
+    assert(!payHtml.includes('free_trial'), `不应包含 free_trial`);
   }
 
   // 6. 管理员概览接口（可选）

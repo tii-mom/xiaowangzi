@@ -1,4 +1,4 @@
-# Coder Pay / 小王子项目 生产环境观测与上线运维规范 (PRODUCTION_OBSERVABILITY)
+# 小王子 SoulMate / xiaowangzi 项目 生产环境观测与上线运维规范 (PRODUCTION_OBSERVABILITY)
 
 本规范定义了项目进入生产观察期后的每日巡检流程、设备保活要求、挂起订单对账审计机制以及生产环境已知未验证范围。
 
@@ -11,16 +11,16 @@
 1. **服务健康性巡检**：运行 `npm run check:health` 自动检查 `https://wan.lat` 各核心公开路由可用性。
 2. **D1 状态巡检**：运行 `npm run check:d1` 检查最近 20 笔订单状态、是否存在 pending 堆积以及账本一致性校对。
 3. **安全与日志审查**：登录 Cloudflare Dashboard，审查 Workers Logs 及 WAF 安全防护拦截日志，核对 `/api/pay/notify` 路径是否有正常的回调入栈，无 5xx 错误。
-4. **App 状态确认**：登录 BufPay 控制台或运行查询确认 Android Watcher 设备心跳是否在 5 分钟内上报，App 在线状态为“在线”。
+4. **App 状态确认**：登录 BufPay 控制台或运行查询确认 BufPay Android 监听 App 设备心跳是否在 5 分钟内上报，App 在线状态为“在线”。
 
 ---
 
-## 2. BufPay Android 监听设备保活与状态要求 (Android Watcher Keepalive)
+## 2. BufPay Android 监听 App 设备保活与状态要求 (Keepalive Guidelines)
 
-自动匹配系统的核心在于 Android App（CP Watcher）的通知监听能力，请严格确保监听设备符合以下配置规范：
+自动匹配系统的核心在于 BufPay Android 监听 App 的通知监听能力，请严格确保监听设备符合以下配置规范：
 
 - **硬件保障**：监听设备必须常年插电（保持恒定电源供应），且连接稳定的无线网络（有条件的优先采用有线网络或独享宽带）。
-- **运行要求**：BufPay Android 客户端程序必须保持在前台/前台服务运行，**严禁手动关闭后台或划掉进程**。
+- **运行要求**：BufPay Android 监听 App 必须保持在前台/前台服务运行，**严禁手动关闭后台或划掉进程**。
 - **通知权限**：确保微信和支付宝的“允许通知”和“锁屏显示通知”权限开启，且微信/支付宝未在 PC 端登录（PC 端登录通常会阻断手机通知栏推送）。
 - **系统设置**：
   1. 开启“无障碍服务”或“通知读取权限”（取决于客户端监听模式）。
@@ -60,7 +60,7 @@ npx wrangler d1 execute xiaowangzi-production --remote --command "SELECT u.id, u
 # 2. 查看最近 5 笔被管理员干预或更正的审计日志
 npx wrangler d1 execute xiaowangzi-production --remote --command "SELECT * FROM admin_audit_logs ORDER BY created_at DESC LIMIT 5;"
 
-# 3. 统计各种支付状态的订单总数
+# 3. 统计各种支付状态 of 订单总数
 npx wrangler d1 execute xiaowangzi-production --remote --command "SELECT status, COUNT(*) FROM payment_orders GROUP BY status;"
 ```
 
