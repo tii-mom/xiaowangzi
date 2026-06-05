@@ -52,63 +52,113 @@ async function writeSystemEvent(type: string, payload: Record<string, unknown>) 
   }
 }
 
+export async function ensureCoreDocumentAndBinding(profileId: number): Promise<void> {
+  const db = getDb();
+  const contentHash = crypto.createHash('sha256').update(DEFAULT_CORE_DOC_CONTENT).digest('hex');
+
+  // 1. 确保 active core document 存在
+  const existingDoc = await db.query(
+    "SELECT id FROM agent_core_documents WHERE agent_profile_id = ? AND status = 'active' LIMIT 1",
+    [profileId]
+  );
+  if (existingDoc.results.length === 0) {
+    try {
+      await db.execute(
+        "INSERT INTO agent_core_documents (agent_profile_id, version, title, content, content_hash, status, created_by) VALUES (?, 1, ?, ?, ?, 'active', 'system')",
+        [profileId, DEFAULT_CORE_DOC_TITLE, DEFAULT_CORE_DOC_CONTENT, contentHash]
+      );
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (!errMsg.includes('UNIQUE') && !errMsg.includes('constraint failed') && !errMsg.includes('CONSTRAINT')) {
+        throw err;
+      }
+    }
+  }
+
+  // 2. 确保 web channel active binding 存在 (解决 NULL 值在 SQLite UNIQUE 约束中不重复判定问题)
+  const existingBinding = await db.query(
+    "SELECT id FROM agent_bindings WHERE agent_profile_id = ? AND channel = 'web' AND status = 'active' LIMIT 1",
+    [profileId]
+  );
+  if (existingBinding.results.length === 0) {
+    try {
+      await db.execute(
+        "INSERT INTO agent_bindings (agent_profile_id, channel, status) VALUES (?, 'web', 'active')",
+        [profileId]
+      );
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (!errMsg.includes('UNIQUE') && !errMsg.includes('constraint failed') && !errMsg.includes('CONSTRAINT')) {
+        throw err;
+      }
+    }
+  }
+}
+
 export async function ensureUserPrimaryAgentProfile(userId: number): Promise<void> {
   const db = getDb();
   try {
     // 1. 查找已存在的 primary active profile
-    const existing = await db.query<AgentProfile>(
-      "SELECT * FROM agent_profiles WHERE user_id = ? AND is_primary = 1 AND status = 'active' LIMIT 1",
+    let profiles = await db.query<AgentProfile>(
+      "SELECT id FROM agent_profiles WHERE user_id = ? AND is_primary = 1 AND status = 'active' LIMIT 1",
       [userId]
     );
 
-    if (existing.results.length > 0) {
-      return; // 幂等退出
-    }
+    let profileId: number | undefined;
 
-    // 2. 找到或创建 LocalAgent user_agent
-    const agentManager = getAgentManager();
-    const userAgent = await agentManager.createUserAgent(userId);
-    const userAgentId = userAgent.id;
+    if (profiles.results.length > 0) {
+      profileId = profiles.results[0].id;
+    } else {
+      // 2. 找到或创建 LocalAgent user_agent
+      const agentManager = getAgentManager();
+      const userAgent = await agentManager.createUserAgent(userId);
+      const userAgentId = userAgent.id;
 
-    // 计算默认文档哈希
-    const contentHash = crypto.createHash('sha256').update(DEFAULT_CORE_DOC_CONTENT).digest('hex');
-
-    // 3. 执行 profile + core doc + binding 的原子事务创建
-    try {
-      await db.batch([
-        {
-          sql: "INSERT INTO agent_profiles (user_id, user_agent_id, display_name, persona_summary, status, is_primary) VALUES (?, ?, '小王子', '陪伴用户的温柔小王子', 'active', 1)",
-          params: [userId, userAgentId]
-        },
-        {
-          sql: "INSERT INTO agent_core_documents (agent_profile_id, version, title, content, content_hash, status, created_by) VALUES (last_insert_rowid(), 1, ?, ?, ?, 'active', 'system')",
-          params: [DEFAULT_CORE_DOC_TITLE, DEFAULT_CORE_DOC_CONTENT, contentHash]
-        },
-        {
-          sql: "INSERT INTO agent_bindings (agent_profile_id, channel, status) VALUES (last_insert_rowid(), 'web', 'active')",
-          params: []
-        }
-      ]);
-      console.log(`[agent-profile] Successfully initialized primary agent profile for user ${userId}`);
-    } catch (innerError) {
-      const innerMsg = innerError instanceof Error ? innerError.message : String(innerError);
-      if (
-        innerMsg.includes('UNIQUE') || 
-        innerMsg.includes('constraint failed') || 
-        innerMsg.includes('CONSTRAINT')
-      ) {
-        console.warn(`[agent-profile] Concurrent creation conflict detected for user ${userId}, checking if profile was created: ${innerMsg}`);
-        const secondaryCheck = await db.query<AgentProfile>(
-          "SELECT * FROM agent_profiles WHERE user_id = ? AND is_primary = 1 AND status = 'active' LIMIT 1",
-          [userId]
+      // 3. 执行 profile 创建
+      try {
+        const profileInsertResult = await db.execute(
+          "INSERT INTO agent_profiles (user_id, user_agent_id, display_name, persona_summary, status, is_primary) VALUES (?, ?, '小王子', '陪伴用户的温柔小王子', 'active', 1)",
+          [userId, userAgentId]
         );
-        if (secondaryCheck.results.length > 0) {
-          console.log(`[agent-profile] Idempotently resolved profile creation for user ${userId}`);
-          return;
+        profileId = profileInsertResult.meta?.last_row_id;
+        if (!profileId) {
+          const check = await db.query<AgentProfile>(
+            "SELECT id FROM agent_profiles WHERE user_id = ? AND is_primary = 1 AND status = 'active' LIMIT 1",
+            [userId]
+          );
+          profileId = check.results[0]?.id;
+        }
+      } catch (innerError) {
+        const innerMsg = innerError instanceof Error ? innerError.message : String(innerError);
+        if (
+          innerMsg.includes('UNIQUE') || 
+          innerMsg.includes('constraint failed') || 
+          innerMsg.includes('CONSTRAINT')
+        ) {
+          console.warn(`[agent-profile] Concurrent creation conflict detected for user ${userId}, checking if profile was created: ${innerMsg}`);
+          const secondaryCheck = await db.query<AgentProfile>(
+            "SELECT id FROM agent_profiles WHERE user_id = ? AND is_primary = 1 AND status = 'active' LIMIT 1",
+            [userId]
+          );
+          if (secondaryCheck.results.length > 0) {
+            profileId = secondaryCheck.results[0].id;
+          } else {
+            throw innerError;
+          }
+        } else {
+          throw innerError;
         }
       }
-      throw innerError;
     }
+
+    if (!profileId) {
+      throw new Error(`无法获取或创建 user ${userId} 的 Agent Profile`);
+    }
+
+    // 4. 补齐 core document 和 binding，保证即使 profile 创建时因并发中断，后续也能完全初始化
+    await ensureCoreDocumentAndBinding(profileId);
+
+    console.log(`[agent-profile] Successfully ensured primary agent profile, core document, and binding for user ${userId}`);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error(`[agent-profile] ensureUserPrimaryAgentProfile failed for user ${userId}:`, errMsg);

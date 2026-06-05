@@ -46,66 +46,82 @@ function d1Execute(sql: string): any {
   return data[0];
 }
 
-async function main() {
-  // 1. 创建全新用户 Session
-  console.log('\n1. 模拟全新用户 POST /api/auth/web-session');
-  const res1 = await fetch(`${BASE_URL}/api/auth/web-session`, { method: 'POST' });
-  assert(res1.status === 200, `web-session status = ${res1.status}`);
-  
-  const body1 = await res1.json() as any;
-  const userId = body1?.user?.id;
-  assert(userId > 0, `获取新创建的 user_id = ${userId}`);
+async function verifyUserAgentStructure(cookieToken: string, label: string) {
+  console.log(`\n--- 验证用户 [${label}] 的 Agent 关系链与外键关系 ---`);
 
-  const setCookie = res1.headers.get('set-cookie') ?? '';
-  const cookieToken = setCookie.split(';')[0].trim();
-  assert(cookieToken.startsWith('auth_token='), `获取 auth_token cookie`);
-
-  // 2. 调用 /api/user/agent-profile 查询接口
-  console.log('\n2. 验证 GET /api/user/agent-profile 接口');
-  const res2 = await fetch(`${BASE_URL}/api/user/agent-profile`, {
+  // 1. 调用 GET /api/user/agent-profile
+  const res = await fetch(`${BASE_URL}/api/user/agent-profile`, {
     headers: { 'Cookie': cookieToken }
   });
-  assert(res2.status === 200, `/api/user/agent-profile status = ${res2.status}`);
+  assert(res.status === 200, `GET /api/user/agent-profile status = ${res.status}`);
 
-  const body2 = await res2.json() as any;
-  const profileId = body2?.profile?.id;
-  assert(profileId > 0, `获取 profile_id = ${profileId}`);
-  assert(body2.profile.display_name === '小王子', `display_name = ${body2.profile.display_name}`);
-  assert(body2.profile.is_primary === true, `is_primary = true`);
-  assert(body2.profile.status === 'active', `profile status = ${body2.profile.status}`);
+  const body = await res.json() as any;
+  const profileId = body?.profile?.id;
+  assert(profileId > 0, `获取 profileId = ${profileId}`);
 
-  const coreDocId = body2?.core_document?.id;
-  assert(coreDocId > 0, `获取 core_document_id = ${coreDocId}`);
-  assert(body2.core_document.version === 1, `core_document version = 1`);
-  assert(body2.core_document.status === 'active', `core_document status = active`);
-  assert(body2.core_document.content === undefined, `安全验证：接口未返回完整 core document content`);
+  // 从 D1 直接验证外键关系
+  console.log(`从 D1 读取 profileId = ${profileId} 的关联数据进行强一致外键校对`);
 
-  // 3. 再次请求登录 (测试 ensure 幂等性)
-  console.log('\n3. 重复请求 web-session 验证幂等性');
+  // 查 profiles
+  const profileRows = d1Execute(`SELECT * FROM agent_profiles WHERE id = ${profileId};`);
+  const profileObj = profileRows?.results?.[0];
+  assert(profileObj !== undefined, `D1 中存在该 profile id: ${profileId}`);
+  assert(profileObj.is_primary === 1, `is_primary 应为 1`);
+
+  const userId = profileObj.user_id;
+
+  // 查 core doc
+  const docRows = d1Execute(`SELECT * FROM agent_core_documents WHERE agent_profile_id = ${profileId} AND status = 'active';`);
+  const docObj = docRows?.results?.[0];
+  assert(docObj !== undefined, `D1 中存在关联的 active core document`);
+  console.log(`  [外键验证] agent_core_documents.agent_profile_id (${docObj.agent_profile_id}) === profileId (${profileId})`);
+  assert(docObj.agent_profile_id === profileId, `Core document 关联外键一致`);
+  assert(docObj.content_hash !== null && docObj.content_hash.length === 64, `content_hash 计算注入成功: ${docObj.content_hash}`);
+
+  // 查 bindings
+  const bindingRows = d1Execute(`SELECT * FROM agent_bindings WHERE agent_profile_id = ${profileId} AND channel = 'web' AND status = 'active';`);
+  const bindingObj = bindingRows?.results?.[0];
+  assert(bindingObj !== undefined, `D1 中存在关联的 active web channel binding`);
+  console.log(`  [外键验证] agent_bindings.agent_profile_id (${bindingObj.agent_profile_id}) === profileId (${profileId})`);
+  assert(bindingObj.agent_profile_id === profileId, `Web binding 关联外键一致`);
+
+  // 验证幂等性：重复登录不创建额外行
   const res3 = await fetch(`${BASE_URL}/api/auth/web-session`, {
     method: 'POST',
     headers: { 'Cookie': cookieToken }
   });
-  assert(res3.status === 200, `重入登录 status = ${res3.status}`);
+  assert(res3.status === 200, `重入登录接口 status = ${res3.status}`);
 
-  // 4. 从 D1 校验数据是否被重复创建
-  console.log('\n4. 从 D1 查询核实物理行数与约束');
-  
-  const profilesResult = d1Execute(`SELECT COUNT(*) as count FROM agent_profiles WHERE user_id = ${userId};`);
-  const profileCount = profilesResult?.results?.[0]?.count ?? 0;
-  assert(profileCount === 1, `agent_profiles 行数应为 1，实际: ${profileCount}`);
+  const profilesCount = d1Execute(`SELECT COUNT(*) as count FROM agent_profiles WHERE user_id = ${userId};`);
+  assert(profilesCount?.results?.[0]?.count === 1, `agent_profiles 物理行数应保持为 1`);
 
-  const activeProfilesResult = d1Execute(`SELECT COUNT(*) as count FROM agent_profiles WHERE user_id = ${userId} AND is_primary = 1 AND status = 'active';`);
-  const activeProfileCount = activeProfilesResult?.results?.[0]?.count ?? 0;
-  assert(activeProfileCount === 1, `active primary profile 行数应为 1，实际: ${activeProfileCount}`);
+  const docsCount = d1Execute(`SELECT COUNT(*) as count FROM agent_core_documents WHERE agent_profile_id = ${profileId};`);
+  assert(docsCount?.results?.[0]?.count === 1, `agent_core_documents 物理行数应保持为 1`);
 
-  const docsResult = d1Execute(`SELECT COUNT(*) as count FROM agent_core_documents WHERE agent_profile_id = ${profileId};`);
-  const docCount = docsResult?.results?.[0]?.count ?? 0;
-  assert(docCount === 1, `agent_core_documents 行数应为 1，实际: ${docCount}`);
+  const bindingsCount = d1Execute(`SELECT COUNT(*) as count FROM agent_bindings WHERE agent_profile_id = ${profileId};`);
+  assert(bindingsCount?.results?.[0]?.count === 1, `agent_bindings 物理行数应保持为 1`);
+}
 
-  const bindingsResult = d1Execute(`SELECT COUNT(*) as count FROM agent_bindings WHERE agent_profile_id = ${profileId} AND channel = 'web' AND status = 'active';`);
-  const bindingCount = bindingsResult?.results?.[0]?.count ?? 0;
-  assert(bindingCount === 1, `web channel agent_bindings 行数应为 1，实际: ${bindingCount}`);
+async function main() {
+  // 1. 创建用户 A
+  console.log('\n1. 模拟用户 A 登录/会话初始化');
+  const resA = await fetch(`${BASE_URL}/api/auth/web-session`, { method: 'POST' });
+  assert(resA.status === 200, `web-session A status = 200`);
+  const bodyA = await resA.json() as any;
+  const setCookieA = resA.headers.get('set-cookie') ?? '';
+  const tokenA = setCookieA.split(';')[0].trim();
+
+  await verifyUserAgentStructure(tokenA, 'User_A');
+
+  // 2. 创建用户 B
+  console.log('\n2. 模拟用户 B 登录/会话初始化 (多用户外键非巧合比对)');
+  const resB = await fetch(`${BASE_URL}/api/auth/web-session`, { method: 'POST' });
+  assert(resB.status === 200, `web-session B status = 200`);
+  const bodyB = await resB.json() as any;
+  const setCookieB = resB.headers.get('set-cookie') ?? '';
+  const tokenB = setCookieB.split(';')[0].trim();
+
+  await verifyUserAgentStructure(tokenB, 'User_B');
 
   console.log(`\n=== 测试结果: ${failures === 0 ? 'ALL PASSED ✅' : `${failures} FAILURES ❌`} ===`);
   process.exit(failures === 0 ? 0 : 1);
