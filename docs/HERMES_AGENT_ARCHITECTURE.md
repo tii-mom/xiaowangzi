@@ -320,11 +320,10 @@ module.exports = {
 * **验收标准**：通过本地及 Staging 数据库 D1 迁移，支持 `/api/user/agent-profile` 只读数据接口，且通过 `scripts/test-agent-profile.ts` 幂等性测试。
 * **回滚方式**：运行降级 SQL 迁移删除新增列与表。
 
-### PR-HERMES2：微信绑定生产化
-* **目标**：完善 Cloudflare 端微信绑定 Webhook 校验、唯一性冲突防护与 system_events 记录。
-* **安全门**：**绝对禁止**设置 `AGENT_BACKEND=hermes`。
-* **修改文件**：`app/api/webhook/hermes/route.ts`。
-* **验收标准**：模拟发送已绑定、不存在绑定码、绑定码过期的 mock 请求，返回对应的拦截信息。
+### PR-HERMES2：微信绑定生产化 [本 PR 落地]
+* **目标**：实现 bind_codes 生产化重构（使用 `pending/consumed/expired/revoked`CHECK）、双向一对一 active bindings 偏独特索引防重、`hermes_messages` 去重幂等及 `system_events` 脱敏审计日志。
+* **安全门**：**绝对禁止**设置 `AGENT_BACKEND=hermes`。暂不接入真实微信，不消费 DeepSeek，不改变计费扣费逻辑。
+* **验收标准**：通过本地及 Staging D1 迁移，支持并发与撤销测试，且 `scripts/test-hermes-binding.ts` 强外键一致性比对通过。
 
 ### PR-HERMES3：腾讯云 Hermes 独立部署文档与脚本
 * **目标**：编写部署至腾讯云所需的 `PM2` 配置文件、安装脚本与无状态 Gateway 目录脚手架。
