@@ -75,7 +75,7 @@ export async function ensureCoreDocumentAndBinding(profileId: number): Promise<v
     }
   }
 
-  // 2. 确保 web channel active binding 存在 (解决 NULL 值在 SQLite UNIQUE 约束中不重复判定问题)
+  // 2. 确保 web channel active binding 存在 (已加 idx_agent_bindings_profile_channel_null_external 唯一索引，配合 SELECT+INSERT 防重)
   const existingBinding = await db.query(
     "SELECT id FROM agent_bindings WHERE agent_profile_id = ? AND channel = 'web' AND status = 'active' LIMIT 1",
     [profileId]
@@ -88,7 +88,20 @@ export async function ensureCoreDocumentAndBinding(profileId: number): Promise<v
       );
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      if (!errMsg.includes('UNIQUE') && !errMsg.includes('constraint failed') && !errMsg.includes('CONSTRAINT')) {
+      if (
+        errMsg.includes('UNIQUE') || 
+        errMsg.includes('constraint failed') || 
+        errMsg.includes('CONSTRAINT')
+      ) {
+        // 并发冲突，再次查询确认是否已被并发线程写入成功
+        const verify = await db.query(
+          "SELECT id FROM agent_bindings WHERE agent_profile_id = ? AND channel = 'web' AND status = 'active' LIMIT 1",
+          [profileId]
+        );
+        if (verify.results.length === 0) {
+          throw err;
+        }
+      } else {
         throw err;
       }
     }

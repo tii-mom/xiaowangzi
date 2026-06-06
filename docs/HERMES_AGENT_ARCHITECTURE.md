@@ -314,7 +314,7 @@ module.exports = {
 
 ## 10. 后续 PR 逐步推进路线图 (Roadmap & Gates)
 
-### PR-HERMES1：Agent profile + core document schema [已落地]
+### PR-HERMES1：Agent profile + core document schema [本 PR 落地]
 * **目标**：建立 `agent_profiles`、`agent_core_documents` 与 `agent_bindings` 数据库表，并扩充 `conversations` 字段（`channel`, `external_message_id`等）。实现登录/会话初始化过程中的默认 Profile 与 Core Document 初始化。
 * **安全门**：**绝对禁止**在生产环境设置 `AGENT_BACKEND=hermes`。
 * **验收标准**：通过本地及 Staging 数据库 D1 迁移，支持 `/api/user/agent-profile` 只读数据接口，且通过 `scripts/test-agent-profile.ts` 幂等性测试。

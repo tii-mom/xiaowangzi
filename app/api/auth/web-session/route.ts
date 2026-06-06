@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'node:crypto';
 import { getDb } from '@/lib/db';
-import { getAgentManager } from '@/lib/agent-manager';
 import { PLANS } from '@/lib/plans';
 import { ensureUserPrimaryAgentProfile } from '@/lib/agent-profile';
 

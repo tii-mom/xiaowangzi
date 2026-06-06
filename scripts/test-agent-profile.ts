@@ -117,11 +117,44 @@ async function main() {
   console.log('\n2. 模拟用户 B 登录/会话初始化 (多用户外键非巧合比对)');
   const resB = await fetch(`${BASE_URL}/api/auth/web-session`, { method: 'POST' });
   assert(resB.status === 200, `web-session B status = 200`);
-  const bodyB = await resB.json() as any;
   const setCookieB = resB.headers.get('set-cookie') ?? '';
   const tokenB = setCookieB.split(';')[0].trim();
 
   await verifyUserAgentStructure(tokenB, 'User_B');
+
+  // 3. 并发防重与幂等测试
+  console.log('\n3. 模拟并发请求登录会话校验 (并发 ensure 幂等性)');
+  const resC = await fetch(`${BASE_URL}/api/auth/web-session`, { method: 'POST' });
+  assert(resC.status === 200, `web-session C status = 200`);
+  const bodyC = await resC.json() as any;
+  const userIdC = bodyC?.user?.id;
+  const setCookieC = resC.headers.get('set-cookie') ?? '';
+  const tokenC = setCookieC.split(';')[0].trim();
+
+  // 同时并发发起 5 次带 Cookie 的 web-session 登录
+  console.log(`  并发发起 5 次登录，触发 ensureUserPrimaryAgentProfile...`);
+  const promises = Array.from({ length: 5 }).map(() =>
+    fetch(`${BASE_URL}/api/auth/web-session`, {
+      method: 'POST',
+      headers: { 'Cookie': tokenC }
+    })
+  );
+  const results = await Promise.all(promises);
+  const allSuccessful = results.every(r => r.status === 200);
+  assert(allSuccessful, `所有并发登录请求均应成功返回 200`);
+
+  // 核实 D1 物理表内行数是否保持唯一
+  const profileRowsC = d1Execute(`SELECT COUNT(*) as count FROM agent_profiles WHERE user_id = ${userIdC};`);
+  assert(profileRowsC?.results?.[0]?.count === 1, `[并发测试] agent_profiles 物理行数保持为 1`);
+
+  const checkProfileC = d1Execute(`SELECT id FROM agent_profiles WHERE user_id = ${userIdC} AND is_primary = 1 AND status = 'active';`);
+  const profileIdC = checkProfileC?.results?.[0]?.id;
+
+  const docsRowsC = d1Execute(`SELECT COUNT(*) as count FROM agent_core_documents WHERE agent_profile_id = ${profileIdC};`);
+  assert(docsRowsC?.results?.[0]?.count === 1, `[并发测试] agent_core_documents 物理行数保持为 1`);
+
+  const bindingsRowsC = d1Execute(`SELECT COUNT(*) as count FROM agent_bindings WHERE agent_profile_id = ${profileIdC} AND channel = 'web' AND status = 'active';`);
+  assert(bindingsRowsC?.results?.[0]?.count === 1, `[并发测试] agent_bindings 物理行数保持为 1`);
 
   console.log(`\n=== 测试结果: ${failures === 0 ? 'ALL PASSED ✅' : `${failures} FAILURES ❌`} ===`);
   process.exit(failures === 0 ? 0 : 1);

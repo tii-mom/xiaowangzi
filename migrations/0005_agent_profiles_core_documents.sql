@@ -60,6 +60,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_bindings_channel_external
 ON agent_bindings(channel, external_id) 
 WHERE external_id IS NOT NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_bindings_profile_channel_null_external
+ON agent_bindings(agent_profile_id, channel)
+WHERE external_id IS NULL;
+
 -- 5. 扩展 conversations 表
 ALTER TABLE conversations ADD COLUMN channel TEXT NOT NULL DEFAULT 'web';
 ALTER TABLE conversations ADD COLUMN external_message_id TEXT;
