@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import crypto from 'node:crypto';
 import { getDb } from '@/lib/db';
 import { getEnv } from '@/lib/env';
 
@@ -7,6 +6,19 @@ function maskExternalId(id: string | null): string | null {
   if (!id) return null;
   if (id.length <= 6) return '***';
   return `${id.slice(0, 4)}***${id.slice(-3)}`;
+}
+
+function getSafeTextPreview(text: string): string {
+  const trimmed = text.trim();
+  const normalized = trimmed.toUpperCase();
+  const isCodeFormat = /^[A-Z0-9]{8}$/.test(normalized);
+  if (isCodeFormat) {
+    return `**${normalized.slice(-2)}`;
+  }
+  const preview = text.slice(0, 20);
+  return preview.replace(/[A-Za-z0-9]{8}/g, (match) => {
+    return `**${match.toUpperCase().slice(-2)}`;
+  });
 }
 
 function validateWebhookSecret(req: NextRequest): boolean {
@@ -52,20 +64,30 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+
+    // 2. 校验 webhook body type
+    if (body.type !== 'message') {
+      return NextResponse.json({
+        ok: true,
+        action: 'ignored',
+        reply: '忽略非 message 类型消息。'
+      });
+    }
+
     const messageId = String(body.message_id ?? '');
     const hermesUserId = String(body.hermes_user_id ?? '');
     const text = String(body.text ?? '').trim();
 
-    // 2. 报文必填校验
+    // 3. 报文必填校验
     if (!messageId || !hermesUserId || !text) {
       console.error('[webhook/hermes] missing required fields');
       return NextResponse.json({ error: 'missing message_id, hermes_user_id, or text' }, { status: 400 });
     }
 
     const db = getDb();
-    const textPreview = text.slice(0, 20);
+    const textPreview = getSafeTextPreview(text);
 
-    // 3. 消息去重，保证幂等性
+    // 4. 消息去重，保证幂等性
     const insertMessage = await db.execute(
       "INSERT OR IGNORE INTO hermes_messages (message_id, hermes_user_id, message_type, text_preview, status) VALUES (?, ?, 'text', ?, 'received')",
       [messageId, hermesUserId, textPreview]
@@ -84,7 +106,7 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedCode = text.toUpperCase();
-    const isCodeFormat = /^[A-F0-9]{8}$/.test(normalizedCode);
+    const isCodeFormat = /^[A-Z0-9]{8}$/.test(normalizedCode);
 
     if (!isCodeFormat) {
       // 非绑定码格式，由于本 PR 只处理绑定消息，忽略并返回 not_found
@@ -103,7 +125,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 4. 查找绑定码记录
+    // 5. 查找绑定码记录
     const codes = await db.query(
       "SELECT * FROM bind_codes WHERE code = ?",
       [normalizedCode]
@@ -133,7 +155,7 @@ export async function POST(req: NextRequest) {
     let status = bindCodeRow.status as string;
     const expiresAt = bindCodeRow.expires_at as string;
 
-    // 5. 校验绑定码状态与过期
+    // 6. 校验绑定码状态与过期
     if (status === 'pending' && new Date().toISOString() > expiresAt) {
       await db.execute(
         "UPDATE bind_codes SET status = 'expired', updated_at = datetime('now') WHERE id = ?",
@@ -177,7 +199,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 6. 冲突防重校验 (WeChat 双重一对一绑定校验)
+    // 7. 冲突防重校验 (WeChat 双重一对一绑定校验)
     
     // Conflict A: 检查此 hermes_user_id 是否已绑定其他 profile
     const existingBindingForWeChat = await db.query(
@@ -230,15 +252,15 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 7. 写入绑定关系 (事务性写入)
+    // 8. 写入绑定关系 (事务性写入)
     try {
-      await db.batch([
+      const batchRes = await db.batch([
         {
           sql: "INSERT INTO agent_bindings (agent_profile_id, channel, external_id, status, created_at, updated_at) VALUES (?, 'wechat', ?, 'active', datetime('now'), datetime('now'))",
           params: [profileId, hermesUserId]
         },
         {
-          sql: "UPDATE bind_codes SET status = 'consumed', consumed_at = datetime('now'), hermes_user_id = ?, updated_at = datetime('now') WHERE id = ?",
+          sql: "UPDATE bind_codes SET status = 'consumed', consumed_at = datetime('now'), hermes_user_id = ?, updated_at = datetime('now') WHERE id = ? AND status = 'pending'",
           params: [hermesUserId, codeId]
         },
         {
@@ -246,6 +268,15 @@ export async function POST(req: NextRequest) {
           params: [messageId]
         }
       ]);
+
+      if ((batchRes[1].meta?.changes ?? 0) === 0) {
+        // Clean up the binding inserted in the same batch
+        await db.execute(
+          "DELETE FROM agent_bindings WHERE agent_profile_id = ? AND channel = 'wechat' AND external_id = ? AND status = 'active'",
+          [profileId, hermesUserId]
+        );
+        throw new Error('bind_code_not_pending');
+      }
 
       await writeSystemEvent('hermes.bind_code.consumed', {
         message_id: messageId,
@@ -269,12 +300,54 @@ export async function POST(req: NextRequest) {
         reply: '绑定成功，你现在可以回到网页查看状态。'
       });
     } catch (dbErr) {
-      const dbErrMsg = dbErr instanceof Error ? dbErr.message : String(dbErr);
+      console.warn('[webhook/hermes] database operation failed or constraint triggered:', dbErr);
+
+      // Re-query the current state to determine the appropriate response
+      const [bindCodeState, wechatBindingState, profileBindingState] = await Promise.all([
+        db.query("SELECT status FROM bind_codes WHERE id = ?", [codeId]),
+        db.query("SELECT agent_profile_id FROM agent_bindings WHERE external_id = ? AND channel = 'wechat' AND status = 'active' LIMIT 1", [hermesUserId]),
+        db.query("SELECT external_id FROM agent_bindings WHERE agent_profile_id = ? AND channel = 'wechat' AND status = 'active' LIMIT 1", [profileId])
+      ]);
+
+      const currentStatus = bindCodeState.results[0]?.status as string | undefined;
+      const isWeChatBound = wechatBindingState.results.length > 0;
+      const isProfileBound = profileBindingState.results.length > 0;
+
+      let action: 'bind_code_unavailable' | 'bind_conflict';
+      let reply: string;
+
+      if (currentStatus === 'consumed' || currentStatus === 'revoked' || currentStatus === 'expired') {
+        action = 'bind_code_unavailable';
+        reply = '该绑定码已失效或已被使用，请重新生成。';
+      } else if (isWeChatBound) {
+        action = 'bind_conflict';
+        reply = '该微信已绑定其他账号，如需换绑请先在对应账号解绑。';
+      } else if (isProfileBound) {
+        action = 'bind_conflict';
+        reply = '你的账号已绑定了微信，无法重复绑定多个微信。';
+      } else {
+        action = 'bind_code_unavailable';
+        reply = '该绑定码已失效，请在网页重新生成。';
+      }
+
+      // Update hermes_messages status
       await db.execute(
-        "UPDATE hermes_messages SET status = 'failed', action = 'db_error', processed_at = datetime('now') WHERE message_id = ?",
-        [messageId]
+        "UPDATE hermes_messages SET status = 'failed', action = ?, processed_at = datetime('now') WHERE message_id = ?",
+        [action, messageId]
       );
-      throw dbErr;
+
+      await writeSystemEvent('hermes.bind_code.concurrency_failed', {
+        message_id: messageId,
+        code_preview: `**${normalizedCode.slice(-2)}`,
+        action,
+        hermes_user_id: maskExternalId(hermesUserId)
+      });
+
+      return NextResponse.json({
+        ok: false,
+        action,
+        reply
+      });
     }
   } catch (err) {
     console.error('[webhook/hermes]', err);
