@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'node:crypto';
 import { getDb } from '@/lib/db';
-import { getAgentManager } from '@/lib/agent-manager';
 import { PLANS } from '@/lib/plans';
+import { ensureUserPrimaryAgentProfile } from '@/lib/agent-profile';
 
 function generateToken(): string {
   return crypto.randomBytes(32).toString('hex');
@@ -20,6 +20,8 @@ export async function POST(req: NextRequest) {
       );
       if (sessions.results.length > 0) {
         const userId = sessions.results[0].user_id as number;
+        // 升级已存在登录态的用户，确保创建 primary agent profile
+        await ensureUserPrimaryAgentProfile(userId);
         const users = await db.query(
           'SELECT id, token_balance, status FROM users WHERE id = ?',
           [userId],
@@ -61,11 +63,8 @@ export async function POST(req: NextRequest) {
       [userId, PLANS.free_trial.tokens_amount, balanceAfter, `web-session:${userId}`],
     );
 
-    try {
-      await getAgentManager().createUserAgent(userId as number);
-    } catch {
-      // non-blocking
-    }
+    // 强要求：确保初始化用户 Primary Agent Profile，失败则直接抛出 500 阻断登录
+    await ensureUserPrimaryAgentProfile(userId as number);
 
     const isProd = (process.env.NODE_ENV ?? '') === 'production';
 
