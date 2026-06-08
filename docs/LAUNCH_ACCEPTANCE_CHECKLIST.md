@@ -42,7 +42,7 @@
 
 ## 9. DeepSeek (大模型对话)
 - [x] 实盘大模型路由（`deepseek-v4-flash`）测试通过：
-  - 成功接收并返回 Assistant 真实 reply (`"B612"`)。
+  - 成功接收并返回 Assistant 真实 reply (`"Z-27"`)。
   - Token 消耗被精确记入 `token_ledger` (`delta_tokens = -476`)。
   - 扣划后的余额被安全记录，`conversations` 表正确生成对话纪录。
 

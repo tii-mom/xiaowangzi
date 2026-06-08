@@ -131,7 +131,7 @@ async function main() {
   const eightCharResult = await processUserChatTurn({
     userId,
     tokenBalance: initialBalance - 150,
-    message: 'B612HOME',
+    message: 'Z27HOME1',
     minTokenBalance: 10000,
     channel: 'hermes',
     externalMessageId: eightCharMessageId,
@@ -139,13 +139,13 @@ async function main() {
     chatCompletion: async () => {
       deepSeekCalls++;
       return {
-        content: 'B612 一直亮着。',
+        content: 'Z-27 一直亮着。',
         usage: { prompt_tokens: 40, completion_tokens: 10, total_tokens: 50 },
       };
     },
   });
   assert(eightCharResult.status === 'ok', '8 位普通文本可进入聊天服务');
-  assert(eightCharResult.reply === 'B612 一直亮着。', '8 位普通文本返回聊天 reply');
+  assert(eightCharResult.reply === 'Z-27 一直亮着。', '8 位普通文本返回聊天 reply');
   assert(deepSeekCalls === 2, '第二条普通消息调用 DeepSeek');
 
   console.log('\n=== 4. 余额不足 ===');

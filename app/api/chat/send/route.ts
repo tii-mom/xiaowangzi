@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getPaymentUser, PaymentAuthError } from '@/lib/payment-user';
 import { processUserChatTurn } from '@/lib/chat-turn';
+import { buildReplyRender } from '@/lib/reply-rendering';
 
 const MIN_CHAT_TOKEN_BALANCE = parseInt(process.env.CHAT_MIN_TOKEN_BALANCE ?? '10000', 10);
 
@@ -56,11 +57,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const render = buildReplyRender(result.reply ?? '', 'web');
+
     return NextResponse.json({
       reply: result.reply,
       usage: result.usage,
       remaining_tokens: result.remainingTokens ?? 0,
       thread_id: threadId,
+      render_format: render.render_format,
+      render_html: render.render_html,
     });
   } catch (err) {
     console.error('[chat/send]', err);

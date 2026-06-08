@@ -4,6 +4,7 @@ import { callDeepSeekChat, DEEPSEEK_MODEL, type ChatResult } from '@/lib/deepsee
 import { buildCompleteAgentRuntimeContext, type AgentChannel } from '@/lib/agent-context';
 import { maybeCaptureExplicitMemory } from '@/lib/agent-memory';
 import { ensureUserPrimaryAgentProfile } from '@/lib/agent-profile';
+import { buildReplyRender } from '@/lib/reply-rendering';
 import type { WebSearchResult } from '@/lib/web-search';
 
 const DEFAULT_MAX_CONTEXT_MESSAGES = 20;
@@ -109,6 +110,7 @@ export async function processUserChatTurn(
   const deepSeekResult = params.chatCompletion
     ? await params.chatCompletion(messages)
     : await callDeepSeekChat(messages, requireEnv('DEEPSEEK_API_KEY'));
+  const assistantReply = buildReplyRender(deepSeekResult.content, channel).reply;
 
   const finalizeResult = await finalizeChatTurn(db, {
     userId: params.userId,
@@ -118,7 +120,7 @@ export async function processUserChatTurn(
     outputTokens: deepSeekResult.usage.completion_tokens,
     totalTokens: deepSeekResult.usage.total_tokens,
     userMessage: params.message,
-    assistantMessage: deepSeekResult.content,
+    assistantMessage: assistantReply,
     userAgentId: agentProfile.user_agent_id,
     agentProfileId: agentProfile.id,
     channel,
@@ -143,7 +145,7 @@ export async function processUserChatTurn(
 
   return {
     status: finalizeResult.status,
-    reply: deepSeekResult.content,
+    reply: assistantReply,
     usage: deepSeekResult.usage,
     remainingTokens: finalizeResult.remainingTokens,
     threadId,

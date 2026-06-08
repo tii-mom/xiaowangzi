@@ -52,6 +52,16 @@ D1 是最适合个人开发者的选择。如果后续规模增长需要更强�
 | `system_events` | 系统事件日志 | -- |
 | `admin_audit_logs` | 管理员操作审计 | -- |
 
+`0009_growth_journey_share.sql` 增加 Growth Journey 与公开分享卡表：
+
+| 表名 | 用途 |
+|------|------|
+| `growth_goals` | 用户 active 成长目标、反愿景、最小可行愿景、daily lever |
+| `growth_daily_practices` | 每日微行动、完成状态、streak |
+| `growth_reflections` | 晚间复盘、默会洞察、下一步调整 |
+| `growth_snapshots` | 7 日 / 30 日成长摘要 |
+| `share_artifacts` | 公开脱敏成长分享卡、view/start 统计 |
+
 ## 金额处理
 
 所有金额字段统一使用 `INTEGER` 存储**分（cents）**，不使用 DECIMAL/FLOAT。

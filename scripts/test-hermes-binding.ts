@@ -225,7 +225,7 @@ async function main() {
       type: 'message',
       message_id: mockMsgIdChat8,
       hermes_user_id: wxid_A,
-      text: 'B612HOME',
+      text: 'Z27HOME1',
       timestamp: Date.now()
     })
   });

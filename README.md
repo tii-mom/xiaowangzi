@@ -9,6 +9,7 @@
 - AI：DeepSeek `deepseek-v4-flash`，按接口返回的 `usage.total_tokens` 记账扣费。
 - 支付：BufPay 创单、回调验签、finalizer 入账、防重复回调。
 - Hermes / Clawbot：Cloudflare 侧已支持 Clawbot 网页扫码绑定 ticket/callback，以及 `/api/bot/clawbot/ingest` 普通聊天扣费闭环；腾讯云 Clawbot bridge 仍需真实微信扫码事件验收后灰度开放。
+- Growth Journey：已支持 3 分钟 Z-27 进化地图、每日微行动、晚间复盘、成长记忆注入和公开脱敏分享卡。
 
 生产环境不要设置 `AGENT_BACKEND=hermes`，直到 Hermes 普通消息链路在 staging 完整验收。
 
@@ -39,6 +40,8 @@ npm run check:d1
 npx tsx scripts/test-e2e-smoke.ts
 npx tsx scripts/test-chat-usage.ts
 npx tsx scripts/test-user-dashboard.ts
+npx tsx scripts/test-growth-journey.ts
+npx tsx scripts/test-growth-share.ts
 ```
 
 需要 staging/remote D1 或真实第三方密钥的脚本必须显式提供环境变量。生产写入型测试带有 `ALLOW_PRODUCTION_*` 安全开关，默认不要运行。

@@ -7,6 +7,7 @@ interface Message {
   id: string;
   sender: 'prince' | 'user';
   text: string;
+  html?: string;
   isTyping?: boolean;
 }
 
@@ -101,6 +102,17 @@ export default function ChatPanel({ onToast }: ChatPanelProps) {
         setIsTyping(false);
 
         const fullText: string = String(data.reply ?? '');
+        const renderHtml = data.render_format === 'html' && typeof data.render_html === 'string'
+          ? data.render_html
+          : undefined;
+        if (renderHtml) {
+          setMessages((prev) => [
+            ...prev,
+            { id: princeMsgId, sender: 'prince', text: fullText, html: renderHtml },
+          ]);
+          return;
+        }
+
         setMessages((prev) => [
           ...prev,
           { id: princeMsgId, sender: 'prince', text: '', isTyping: true },
@@ -220,12 +232,19 @@ export default function ChatPanel({ onToast }: ChatPanelProps) {
                         : 'bg-gradient-to-r from-amber-400 to-[#fcd34d] text-slate-950 rounded-tr-sm font-semibold'
                     }`}
                   >
-                    <p className="text-[11px] sm:text-[11.5px] break-words whitespace-pre-wrap">
-                      {msg.text}
-                      {msg.isTyping && (
-                        <span className="inline-block w-1.5 h-3.5 bg-indigo-400 opacity-80 animate-[pulse_1s_infinite] ml-0.5">|</span>
-                      )}
-                    </p>
+                    {isPrince && msg.html ? (
+                      <div
+                        className="text-[11px] sm:text-[11.5px] break-words"
+                        dangerouslySetInnerHTML={{ __html: msg.html }}
+                      />
+                    ) : (
+                      <p className="text-[11px] sm:text-[11.5px] break-words whitespace-pre-wrap">
+                        {msg.text}
+                        {msg.isTyping && (
+                          <span className="inline-block w-1.5 h-3.5 bg-indigo-400 opacity-80 animate-[pulse_1s_infinite] ml-0.5">|</span>
+                        )}
+                      </p>
+                    )}
                   </div>
                 </div>
               );

@@ -1,6 +1,12 @@
 import { buildAgentSystemContext } from '@/lib/agent-profile';
 import { formatMemoriesForPrompt, getActiveMemories } from '@/lib/agent-memory';
 import {
+  LIFE_REDESIGN_SKILL_TITLE,
+  formatLifeRedesignRuntimeHint,
+  formatLifeRedesignSkillForPrompt,
+} from '@/lib/agent-skills/life-redesign';
+import { formatGrowthContextForPrompt } from '@/lib/growth';
+import {
   decideWebSearch,
   formatSearchForPrompt,
   runControlledWebSearch,
@@ -21,21 +27,28 @@ export async function buildCompleteAgentRuntimeContext(params: {
   channel: AgentChannel;
   message: string;
 }): Promise<AgentRuntimeContext> {
-  const [agentContext, memories] = await Promise.all([
+  const [agentContext, memories, growthContext] = await Promise.all([
     buildAgentSystemContext(params.userId),
     getActiveMemories(params.userId),
+    formatGrowthContextForPrompt(params.userId),
   ]);
   const searchDecision = decideWebSearch(params.message);
   const searchResult = searchDecision.shouldSearch
     ? await runControlledWebSearch(searchDecision.query)
     : undefined;
+  const skillPrompt = agentContext.coreDoc.includes(LIFE_REDESIGN_SKILL_TITLE)
+    ? null
+    : formatLifeRedesignSkillForPrompt();
 
   const systemPrompt = [
     agentContext.combinedPrompt,
+    skillPrompt,
+    formatLifeRedesignRuntimeHint(params.message),
+    growthContext,
     formatMemoryContext(formatMemoriesForPrompt(memories)),
     formatRuntimeContext(params.channel),
     searchResult ? formatSearchForPrompt(searchResult) : formatNoSearchContext(),
-  ].join('\n\n');
+  ].filter(Boolean).join('\n\n');
 
   return { systemPrompt, searchDecision, searchResult };
 }

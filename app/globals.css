@@ -1,4 +1,7 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+@source "./";
+@source "../components";
+@source "../lib";
 
 @layer utilities {
   .bg-grid-white\/5 {
@@ -42,6 +45,34 @@
   animation: shooting-star 12s linear infinite;
 }
 
+.xwz-rich-reply {
+  display: grid;
+  gap: 0.5rem;
+  color: rgb(226 232 240);
+  line-height: 1.7;
+}
+
+.xwz-rich-reply h5 {
+  color: rgb(253 230 138);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.xwz-rich-reply p {
+  margin: 0;
+}
+
+.xwz-rich-reply ol {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.xwz-rich-reply li {
+  padding-left: 0.1rem;
+}
+
 /* Beautiful custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
@@ -57,4 +88,3 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(251, 191, 36, 0.4);
 }
-

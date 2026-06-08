@@ -127,7 +127,7 @@ export default function NightQuestions({ onToast }: NightQuestionsProps) {
             >
               <div className="text-center pb-1">
                 <div className="inline-block px-2.5 py-0.5 rounded text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-mono tracking-wide">
-                  ✨ 获得 B612 灵魂收档日记
+                  ✨ 获得 Z-27 灵魂收档日记
                 </div>
               </div>
               <div className="p-4 rounded-xl bg-[#020617] border border-indigo-500/35 space-y-3.5 shadow-inner relative overflow-hidden">

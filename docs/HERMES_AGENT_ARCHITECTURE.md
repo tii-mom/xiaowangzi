@@ -13,12 +13,12 @@
 
 ### 1.1 文件及模块现状检查
 
-* **`docs/HERMES_POC.md`**：记录了前期针对 Hermes 集成的一些假设（如 REST API 验证、Webhook 签名鉴权），目前所有实际连接和通信通道均为 **未验证 (Mock)** 状态。
+* **`docs/HERMES_POC.md`**：记录了前期针对 Hermes 集成的一些假设（如 REST API 验证、Webhook 签名鉴权），仅作为历史 POC 参考。
 * **`app/api/webhook/hermes/route.ts`**：实现了基础的 Webhook 接收端逻辑，能够对 `HERMES_WEBHOOK_SECRET` 进行校验。目前优先使用 `x-hermes-secret` 作为校验头（向下兼容 Authorization Bearer 头）。具备基本的一次性绑定码解析（通过正则 `/^[A-F0-9]{8}$/` 匹配），并在 pending 期限内通过 D1 锁定绑定状态，同时在绑定成功后触发 `getAgentManager().createUserAgent(userId)`。
 * **`app/api/bind/create-code/route.ts` & `status/route.ts`**：
   * `create-code`：在 D1 中为已登录的 Web 用户生成唯一的、限时 15 分钟失效的一次性 pending 绑定码。
   * `status`：返回用户的微信绑定状态（`status` + 兼容字段 `is_bound`），以 `agent_bindings` 的 active wechat 绑定为准。
-* **`/bind` 页面与 BindFlowMock**：前端已经完成了微信绑定二维码指引、绑定状态轮询交互，目前状态更新逻辑依赖前端 Mock 状态。
+* **`/bind` 页面与 Clawbot ticket flow**：前端通过 `/api/bot/clawbot/bind-ticket` 打开正式 Clawbot 扫码授权页，并通过 `/api/bind/status` 轮询真实绑定状态。
 * **`lib/agent-manager.ts`**：
   * 包含 `LocalAgentManager`：Web MVP 默认在 D1 数据库中创建 `status = 'active'` 的本地 Agent 代理占位行（`local-user-${userId}`），用于支持 Web Chat。
   * 包含 `HermesAgentManager`：目前仍是 skeleton 状态，任何实际调用均会直接 `throw new Error` 阻断，提醒开发者当前不可启用，保障主链路安全。
@@ -34,7 +34,7 @@
 | 评估维度 | 详情说明 |
 |:---|:---|
 | **已完成能力** | Web 侧的绑定码（create-code/status）生命周期管理；本地 `user_agents` 虚拟代理占位符自动初始化；Webhook 鉴权逻辑框架。 |
-| **POC 能力** | 前端 `/bind` 二维码及绑定进度轮询交互；不依赖真实网关的内存 Mock 绑定。 |
+| **灰度能力** | Clawbot 网页扫码 ticket、绑定回调、绑定状态轮询、绑定后普通消息入口。 |
 | **未验证能力** | 微信扫码/长连接状态同步；基于 `HERMES_WEBHOOK_SECRET` 的腾讯云与 Cloudflare 真实跨网段回调；消息收发及 Token 账本的并发扣费。 |
 | **缺失能力** | **微信消息幂等校验**（微信重试可能导致 D1 账本重复扣费）；**渠道分流与投递日志**（`conversations` 无法分类，缺少消息递送记录）；**Agent 核心文档的装配与 Admin 后台更新架构**。 |
 | **Blocker 阻碍项** | 微信 Bot 协议长连接未跑通；未冻结的每用户 Agent / 核心文档 D1 Schema。 |
