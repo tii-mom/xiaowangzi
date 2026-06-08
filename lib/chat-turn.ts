@@ -52,7 +52,7 @@ export async function processUserChatTurn(
   const messages = await buildChatMessages(
     db,
     params.userId,
-    agentContext.combinedPrompt,
+    withRuntimeContext(agentContext.combinedPrompt, channel),
     params.message,
   );
 
@@ -156,6 +156,25 @@ async function buildChatMessages(
 
   messages.push({ role: 'user', content: userMessage });
   return messages;
+}
+
+function withRuntimeContext(systemPrompt: string, channel: ChatChannel): string {
+  const now = new Date();
+  const timeZone = 'Asia/Shanghai';
+  const formatted = new Intl.DateTimeFormat('zh-CN', {
+    timeZone,
+    dateStyle: 'full',
+    timeStyle: 'medium',
+    hour12: false,
+  }).format(now);
+
+  return `${systemPrompt}
+
+[运行时上下文]
+- 当前时间：${formatted}
+- 当前时区：${timeZone}
+- 当前渠道：${channel}
+- 如果用户询问当前时间或日期，直接使用以上运行时上下文回答。`;
 }
 
 interface FinalizeChatTurnParams {

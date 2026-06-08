@@ -76,6 +76,9 @@ async function main() {
   assert(deepSeekCalls === 1, 'DeepSeek 调用 1 次');
   assert(capturedPrompt.includes(DEFAULT_CORE_DOC_CONTENT), 'system prompt 包含 Core Document');
   assert(capturedPrompt.includes('陪伴用户的温柔小王子'), 'system prompt 包含 persona summary');
+  assert(capturedPrompt.includes('[运行时上下文]'), 'system prompt 包含运行时上下文');
+  assert(capturedPrompt.includes('当前时区：Asia/Shanghai'), 'system prompt 包含当前时区');
+  assert(capturedPrompt.includes('当前渠道：hermes'), 'system prompt 包含 Hermes 渠道');
 
   const convRows = await db.query(
     "SELECT role, channel, external_message_id, agent_profile_id FROM conversations WHERE thread_id = ? ORDER BY id ASC",
