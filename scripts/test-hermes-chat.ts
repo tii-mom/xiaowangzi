@@ -172,7 +172,32 @@ async function main() {
   assert(poorResult.status === 'insufficient_tokens', '余额不足返回 insufficient_tokens');
   assert(deepSeekCalls === 2, '余额不足不调用 DeepSeek');
 
-  console.log('\n=== 5. 实时问题但搜索工具未配置 ===');
+  console.log('\n=== 5. 刚好等于最低余额可完成首轮聊天 ===');
+  const thresholdUserId = 93004;
+  await db.execute(
+    "INSERT INTO users (id, token_balance, status) VALUES (?, ?, 'active')",
+    [thresholdUserId, 10000],
+  );
+  const thresholdResult = await processUserChatTurn({
+    userId: thresholdUserId,
+    tokenBalance: 10000,
+    message: '今天几号？请直接回答。',
+    minTokenBalance: 10000,
+    channel: 'hermes',
+    externalMessageId: `wx_msg_threshold_${Date.now().toString(36)}`,
+    chatCompletion: async () => {
+      deepSeekCalls++;
+      return {
+        content: '今天是 2026 年 6 月 9 日。',
+        usage: { prompt_tokens: 30, completion_tokens: 10, total_tokens: 40 },
+      };
+    },
+  });
+  assert(thresholdResult.status === 'ok', '等于最低余额允许首轮聊天');
+  assert(thresholdResult.remainingTokens === 9960, '首轮聊天正常扣费');
+  assert(deepSeekCalls === 3, '首轮聊天调用 DeepSeek');
+
+  console.log('\n=== 6. 实时问题但搜索工具未配置 ===');
   const toolUserId = 93003;
   await db.execute(
     "INSERT INTO users (id, token_balance, status) VALUES (?, ?, 'active')",
@@ -196,7 +221,7 @@ async function main() {
   });
   assert(unavailable.status === 'tool_unavailable', `搜索未配置返回 tool_unavailable (${unavailable.status})`);
   assert(String(unavailable.reply).includes('联网搜索工具'), '搜索未配置时短答说明工具不可用');
-  assert(deepSeekCalls === 2, '搜索工具未配置不调用 DeepSeek');
+  assert(deepSeekCalls === 3, '搜索工具未配置不调用 DeepSeek');
   const toolLedgerRows = await db.query(
     "SELECT id FROM token_ledger WHERE user_id = ? AND type = 'usage'",
     [toolUserId],

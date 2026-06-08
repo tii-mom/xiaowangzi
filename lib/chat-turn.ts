@@ -42,7 +42,7 @@ export async function processUserChatTurn(
   const channel = params.channel ?? 'web';
   const db = getDb();
 
-  if (params.tokenBalance <= params.minTokenBalance) {
+  if (params.tokenBalance < params.minTokenBalance) {
     return {
       status: 'insufficient_tokens',
       remainingTokens: params.tokenBalance,
