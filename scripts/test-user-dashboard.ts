@@ -72,6 +72,21 @@ async function main() {
   assert(!isProd || hasToken, `prod需ADMIN_TOKEN: isProd=${isProd}`);
   if (!hasToken && !isProd) console.log('  ℹ️ dev ADMIN_TOKEN 未配置');
 
+  await db.execute(
+    "CREATE TABLE IF NOT EXISTS admin_users (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, role TEXT NOT NULL DEFAULT 'admin', status TEXT NOT NULL DEFAULT 'active', granted_by TEXT, reason TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(user_id))",
+    [],
+  );
+  await db.execute(
+    "INSERT OR REPLACE INTO admin_users (user_id, role, status, granted_by, reason) VALUES (?, 'owner', 'active', 'test', 'dashboard regression')",
+    [91001],
+  );
+  const adminRows = await db.query(
+    "SELECT role, status FROM admin_users WHERE user_id = ?",
+    [91001],
+  );
+  assert(adminRows.results[0]?.role === 'owner', 'admin_users 可将指定用户设为 owner');
+  assert(adminRows.results[0]?.status === 'active', 'admin_users status = active');
+
   // 5. config check
   console.log('\n=== 5. 配置检查 ===');
   const { PLANS } = await import('../lib/plans');

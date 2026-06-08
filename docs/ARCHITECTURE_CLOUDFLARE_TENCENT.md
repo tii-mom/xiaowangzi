@@ -1,6 +1,6 @@
 # 小王子 SoulMate — 目标架构 (Cloudflare + 腾讯云)
 
-> **状态**: 目标架构 / 渐进迁移中  
+> **状态**: Web/API 主线已迁移至 Cloudflare Workers；Hermes 微信网关仍处于后续联调阶段
 > **最后更新**: 2026-06-04
 
 ## 架构概览
@@ -18,17 +18,17 @@
 │  • BufPay 支付回调 (/api/pay/notify)                 │
 │  • Web session (/api/auth/web-session)               │
 │  • Dashboard / Pay / Bind / Admin                    │
-│  • Hermes webhook 接收 (/api/webhook/hermes)         │
+│  • Clawbot 绑定回调与 Hermes 消息接收                 │
 └─────────────────────────┬───────────────────────────┘
                           │
                           │ webhook (带 HERMES_WEBHOOK_SECRET)
                           ▼
 ┌─────────────────────────────────────────────────────┐
 │                  腾讯云 CVM (2G)                      │
-│               (hermes.wan.lat)                       │
+│               (wechat.tai.lat / hermes.wan.lat)      │
 │                                                     │
 │  ┌─────────────────────────────────────────────┐    │
-│  │              Hermes Agent                     │    │
+│  │              Hermes / Clawbot Bridge          │    │
 │  │                                               │    │
 │  │  • 微信机器人                                  │    │
 │  │  • iLink / 扫码 / 个人号消息收发                │    │
@@ -62,8 +62,8 @@
 
 ### Hermes 接入是后续阶段
 
-1. **当前阶段（PR-CF1）**: Cloudflare Workers POC，验证 Web MVP 在 Worker 环境运行。
-2. **后续阶段**: Hermes 真实验证通过后，配置 `AGENT_BACKEND=hermes`，启用 Hermes webhook。
+1. **当前阶段（PR-HERMES2）**: Web MVP、支付、D1、Agent Profile/Core Document、Clawbot 网页扫码绑定与普通消息 Webhook 已在 Cloudflare 主线上实现。
+2. **后续阶段**: Hermes 真实普通消息链路验证通过后，才允许在 staging 临时配置 `AGENT_BACKEND=hermes`；生产继续禁用。
 
 ### 安全边界
 
@@ -82,7 +82,7 @@
 ## 数据流（完整）
 
 ```
-用户微信 → Hermes Gateway（腾讯云）
+用户微信 → Hermes / Clawbot Bridge（腾讯云）
               │
               │ POST /api/webhook/hermes
               │ Header: x-webhook-signature
@@ -98,18 +98,18 @@
               └─ 返回响应
               │
               ▼
-         Hermes Gateway → 微信用户
+         Hermes / Clawbot Bridge → 微信用户
 ```
 
 ## 迁移路线图
 
 | 阶段 | 内容 | 平台 | 状态 |
 |------|------|------|------|
-| PR-0 ~ PR-6 | Web MVP 构建 | 腾讯云 standalone | ✅ 已完成 |
-| PR-CF1 | Cloudflare Workers POC | Cloudflare Workers | 🔄 进行中 |
-| PR-CF2 | D1 Binding Adapter | Cloudflare D1 | 📋 计划中 |
-| 后续 | Hermes 真实验证 | 腾讯云 | 📋 计划中 |
-| 后续 | 生产上线 | Cloudflare + 腾讯云 | 📋 计划中 |
+| PR-0 ~ PR-CF6 | Web MVP、支付、D1、生产验收 | Cloudflare Workers + D1 | ✅ 已完成/待运营确认 |
+| PR-HERMES1 | Agent Profile + Core Document schema | Cloudflare D1 | ✅ 已落地 |
+| PR-HERMES2 | Clawbot 网页扫码绑定生产化 | Cloudflare Workers + D1 | ✅ 当前分支 |
+| PR-HERMES3 | Hermes / Clawbot 腾讯云 Bridge 配置与灰度 | 腾讯云 | 📋 计划中 |
+| PR-HERMES4/5 | 普通消息联调、DeepSeek 扣费闭环 | 腾讯云 + Cloudflare | 📋 计划中 |
 
 ## 相关文档
 

@@ -1,33 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
-import { getEnv } from '@/lib/env';
-
-function validateAdmin(req: NextRequest): boolean {
-  const nodeEnv = process.env.NODE_ENV ?? 'development';
-  const adminToken = getEnv('ADMIN_TOKEN');
-
-  if (!adminToken || adminToken.trim() === '') {
-    if (nodeEnv === 'production') {
-      return false;
-    }
-    console.warn('[admin] ADMIN_TOKEN not configured — accepting in dev');
-    return true;
-  }
-
-  const header = req.headers.get('x-admin-token');
-  if (header === adminToken) return true;
-
-  const auth = req.headers.get('authorization');
-  if (auth) {
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : auth;
-    if (token === adminToken) return true;
-  }
-
-  return false;
-}
+import { requireAdmin } from '@/lib/admin-auth';
 
 export async function GET(req: NextRequest) {
-  if (!validateAdmin(req)) {
+  const admin = await requireAdmin(req, { minRole: 'readonly' });
+  if (!admin) {
     return NextResponse.json({ error: '未授权' }, { status: 403 });
   }
 
@@ -63,6 +40,11 @@ export async function GET(req: NextRequest) {
     );
 
     return NextResponse.json({
+      admin: {
+        method: admin.method,
+        user_id: admin.userId,
+        role: admin.role,
+      },
       users_count: (usersCount.results[0] as Record<string, unknown>)?.cnt,
       orders_count: (ordersCount.results[0] as Record<string, unknown>)?.cnt,
       paid_orders_count: (paidOrders.results[0] as Record<string, unknown>)?.cnt,

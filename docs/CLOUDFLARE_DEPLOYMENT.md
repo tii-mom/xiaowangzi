@@ -1,12 +1,13 @@
-# Cloudflare Workers 部署方案 (POC)
+# Cloudflare Workers 部署方案
 
-> **状态**: POC（概念验证）/ 验证通过  
+> **状态**: Cloudflare Workers 主线部署方案 / Staging 支付验证通过 / 生产状态以 Launch Checklist 为准
 > **最后更新**: 2026-06-05
 
 ## 当前状态说明
 
-1. 本方案是 Cloudflare Workers 部署的 **POC（概念验证）**。
-2. 经过微信与支付宝的真实 E2E 扫码支付测试，证明整体技术闭环已**完全跑通**。
+1. Cloudflare Workers 已成为 Web/API 主线部署方案。
+2. Staging 已通过微信与支付宝 0.10 元真实扫码支付测试。
+3. 生产支付实扫状态以 `docs/LAUNCH_ACCEPTANCE_CHECKLIST.md` 和运营付款凭证为准，不从 staging 结果推断。
 
 ---
 
@@ -248,4 +249,4 @@ npm run cf:typegen
 - 不要在此阶段删除 `docs/DEPLOYMENT.md`（腾讯云部署文档）。
 - 不要将 Cloudflare API Token 写入文档或提交到仓库。
 - 不要记录真实 secret 值。
-- 这是 POC，不要假装 Cloudflare 已上线。
+- Cloudflare 生产上线状态以 `docs/LAUNCH_ACCEPTANCE_CHECKLIST.md` 为准；不要把 staging 支付结果写成生产实扫结论。

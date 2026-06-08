@@ -1,4 +1,10 @@
 /**
+ * LEGACY: old "send bind code to WeChat" E2E.
+ *
+ * The production Hermes / Clawbot path now uses Clawbot webpage scan binding:
+ * POST /api/bot/clawbot/bind-ticket + POST /api/bot/clawbot/bind-callback.
+ * Do not use this script as a release gate for Clawbot scan binding.
+ *
  * E2E Hermes WeChat Binding Productionization Test
  * 
  * 运行方法:
@@ -204,7 +210,28 @@ async function main() {
   assert(resStatusA.status === 200, `查询绑定状态返回 200`);
   const bodyStatusA = await resStatusA.json() as any;
   assert(bodyStatusA.status === 'bound', `状态已变为 bound`);
+  assert(bodyStatusA.is_bound === true, `兼容字段 is_bound = true`);
   assert(bodyStatusA.masked_external_id === maskWechatId(wxid_A), `微信号脱敏匹配: ${bodyStatusA.masked_external_id}`);
+
+  // 4.3 已绑定微信发送 8 位普通文本时，不应再被硬判为 bind_code_not_found
+  const mockMsgIdChat8 = `msg_test_${crypto.randomBytes(6).toString('hex')}`;
+  const resChat8 = await fetch(webhookUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-hermes-secret': HERMES_WEBHOOK_SECRET
+    },
+    body: JSON.stringify({
+      type: 'message',
+      message_id: mockMsgIdChat8,
+      hermes_user_id: wxid_A,
+      text: 'B612HOME',
+      timestamp: Date.now()
+    })
+  });
+  assert(resChat8.status === 200 || resChat8.status === 402, `已绑定 8 位文本进入聊天/余额分支, 状态码: ${resChat8.status}`);
+  const bodyChat8 = await resChat8.json() as any;
+  assert(bodyChat8.action !== 'bind_code_not_found', `已绑定 8 位文本不应被当作不存在绑定码: action=${bodyChat8.action}`);
 
   // 5. 消息幂等与去重测试
   console.log('\n5. 验证消息去重与幂等处理');

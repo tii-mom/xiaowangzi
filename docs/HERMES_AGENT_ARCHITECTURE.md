@@ -4,6 +4,8 @@
 
 > [!IMPORTANT]
 > **当前状态警示**：Hermes 微信机器人网关当前未真实上线，且在没有完整通过 staging 联调和安全防护审查前，生产环境变量 **`AGENT_BACKEND=hermes` 保持禁止设置状态**。
+>
+> **2026-06-08 更新**：本文早期章节中的“向微信发送 8 位绑定码”方案已废弃。当前唯一有效绑定路径是 Hermes / Clawbot 网页扫码：`POST /api/bot/clawbot/bind-ticket` 生成 `claw_*` ticket，Clawbot bridge 回调 `POST /api/bot/clawbot/bind-callback` 完成绑定。
 
 ---
 
@@ -15,13 +17,13 @@
 * **`app/api/webhook/hermes/route.ts`**：实现了基础的 Webhook 接收端逻辑，能够对 `HERMES_WEBHOOK_SECRET` 进行校验。目前优先使用 `x-hermes-secret` 作为校验头（向下兼容 Authorization Bearer 头）。具备基本的一次性绑定码解析（通过正则 `/^[A-F0-9]{8}$/` 匹配），并在 pending 期限内通过 D1 锁定绑定状态，同时在绑定成功后触发 `getAgentManager().createUserAgent(userId)`。
 * **`app/api/bind/create-code/route.ts` & `status/route.ts`**：
   * `create-code`：在 D1 中为已登录的 Web 用户生成唯一的、限时 15 分钟失效的一次性 pending 绑定码。
-  * `status`：返回用户的微信绑定状态（`is_bound`，判断 `hermes_user_id` 或 `wechat_external_id` 是否存在）。
+  * `status`：返回用户的微信绑定状态（`status` + 兼容字段 `is_bound`），以 `agent_bindings` 的 active wechat 绑定为准。
 * **`/bind` 页面与 BindFlowMock**：前端已经完成了微信绑定二维码指引、绑定状态轮询交互，目前状态更新逻辑依赖前端 Mock 状态。
 * **`lib/agent-manager.ts`**：
   * 包含 `LocalAgentManager`：Web MVP 默认在 D1 数据库中创建 `status = 'active'` 的本地 Agent 代理占位行（`local-user-${userId}`），用于支持 Web Chat。
   * 包含 `HermesAgentManager`：目前仍是 skeleton 状态，任何实际调用均会直接 `throw new Error` 阻断，提醒开发者当前不可启用，保障主链路安全。
 * **数据库表设计状况**：
-  * `users`：包含了 `hermes_user_id` 和 `wechat_external_id`，用于绑定微信。
+  * `users`：仍保留 `hermes_user_id` 和 `wechat_external_id` 兼容字段；当前绑定状态以 `agent_bindings` 为准。
   * `user_agents`：存储 Agent 的基本代理关联，目前仅有 `id`, `user_id`, `agent_name`, `status` 字段。
   * `bind_codes`：包含 `code`, `user_id`, `status` (`pending`/`used`/`expired`), `expires_at`。
   * `conversations`：用于存储聊天记录，目前**缺少来源渠道分类**，无法区分 Web Chat 与微信消息。
@@ -44,7 +46,7 @@
 ## 2. 核心架构关键问题回答 (Key Q&A)
 
 1. **当前是否真正实现“每个用户一个 Agent”？**
-   * **答**：没有。当前仅在 `user_agents` 中写入了一个包含用户 ID 的占位记录。本质上所有用户在后台交互时，依然是在共享同一个硬编码在代码里的全局 system prompt (`PRINCE_SYSTEM_PROMPT`)，没有任何针对用户的个性化“核心文档”装配与人设分发。
+   * **答**：已完成 Web 主线的 Primary Agent Profile 初始化，并在 Web Chat 中装配 active Core Document 与 persona summary；微信普通消息链路仍未接入。
 2. **当前 `user_agents` 表是否足够支撑生产？**
    * **答**：不足够。当前表缺少关联的 Profile 形象、Core Document 版本、记忆体（Memory）以及多渠道接入标识。
 3. **Web Chat 当前使用的 Agent 与未来微信 Agent 是否会是同一个？**
@@ -125,39 +127,35 @@ CREATE INDEX IF NOT EXISTS idx_agent_core_docs_agent_status ON agent_core_docume
 ## 5. 微信绑定正式化设计 (WeChat Binding Flow)
 
 ```
-[Web 用户]                 [Cloudflare Workers]             [Hermes (Tencent Cloud)]      [微信端]
+[Web 用户]                 [Cloudflare Workers]             [Hermes / Clawbot Bridge]      [微信端]
     |                               |                                  |                     |
-    | 1. 点击绑定，请求 bind_code     |                                  |                     |
+    | 1. 点击绑定，请求 Clawbot ticket |                                  |                     |
     |------------------------------>|                                  |                     |
-    | 2. 生成 code & 15m expires    |                                  |                     |
+    | 2. 生成 claw_* ticket & expires|                                  |                     |
     |    写入 D1 status='pending'    |                                  |                     |
     |<------------------------------|                                  |                     |
-    | 3. 展示 8位大写十六进制绑定码   |                                  |                     |
+    | 3. 展示 Clawbot bind_url       |                                  |                     |
     |                               |                                  |                     |
-    | 4. 向小王子微信个人号/Hermes 托管微信号发送绑定码 ---------------------------------------->|
-    |                                                                  |                     |
-    |                                                                  | 5. 收到消息并捕获码 |
-    |                                                                  |                     |
-    |                               6. POST /api/webhook/hermes        |<--------------------|
-    |                                  Header: x-hermes-secret         |                     |
-    |                                  Payload: { user_id, content }  |                     |
+    | 4. 打开 bind_url 并按页面提示扫码确认 --------------------------->|
+    |                                                                  | 5. 微信扫码确认      |
+    |                               6. POST /api/bot/clawbot/bind-callback<--------------------|
+    |                                  Header: x-clawbot-signature     |                     |
+    |                                  Payload: { ticket, providerUserId }|                   |
     |                               <----------------------------------|                     |
-    | 7. 校验 Webhook Secret         |                                  |                     |
-    | 8. 查找 pending bind_code      |                                  |                     |
+    | 7. 校验 Clawbot HMAC           |                                  |                     |
+    | 8. 查找 pending ticket         |                                  |                     |
     | 9. 唯一性校对 (一微信绑一用户)   |                                  |                     |
-    | 10. 更新 users.hermes_user_id |                                  |                     |
-    |     更新 bind_codes 为 'used'  |                                  |                     |
+    | 10. 写入 agent_bindings       |                                  |                     |
+    |     更新 bind_codes 为 consumed|                                  |                     |
     |     写入 system_events         |                                  |                     |
     | 11. 返回 { ok: true } -------->|                                  |                     |
-    |                               | 12. 回显 "绑定成功，开始聊天！" ---->|                     |
-    |                               |                                  |-------------------->|
-    | 13. 轮询 status 检测到 is_bound|                                  |                     |
+    | 12. 轮询 status 检测到 bound/is_bound|                              |                     |
     |     自动跳转到 dashboard       |                                  |                     |
 ```
 
 ### 5.1 异常防御规则
-* **防篡改与覆盖**：若 `users` 表对应的行已有 `hermes_user_id` 且不一致，拒绝该次绑定，避免重复绑定或将不同微信错绑到同一账号上。
-* **一次性失效**：绑定码一旦使用或在 15 分钟超时后自动物理失效，且在数据库中使用 `WHERE status = 'pending'` 限制条件更新，避免高并发重放漏洞。
+* **防篡改与覆盖**：若 `agent_bindings` 中已存在 active wechat 绑定，则拒绝该次绑定，避免重复绑定或将不同微信错绑到同一账号上。
+* **一次性失效**：Clawbot ticket 一旦使用或超时后自动失效，且在数据库中使用 `WHERE status = 'pending'` 限制条件更新，避免高并发重放漏洞。
 * **解绑设计**：解绑流程暂不放在首发 MVP，后续 PR 另外单独处理。
 
 ---

@@ -84,7 +84,8 @@ export async function POST(req: NextRequest) {
       code,
       status: 'pending',
       expires_at: expiresAt,
-      instructions: `请在小王子微信中发送绑定码 ${code} 完成绑定`
+      legacy: true,
+      instructions: '该接口为旧绑定码兼容接口；Hermes / Clawbot 绑定请使用网页扫码入口。'
     });
   } catch (err) {
     console.error('[bind/create-code]', err);
