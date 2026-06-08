@@ -1,11 +1,14 @@
 import { getDb, type DatabaseAdapter } from '@/lib/db';
 import { requireEnv } from '@/lib/env';
 import { callDeepSeekChat, DEEPSEEK_MODEL, type ChatResult } from '@/lib/deepseek';
-import { buildAgentSystemContext, ensureUserPrimaryAgentProfile } from '@/lib/agent-profile';
+import { buildCompleteAgentRuntimeContext, type AgentChannel } from '@/lib/agent-context';
+import { maybeCaptureExplicitMemory } from '@/lib/agent-memory';
+import { ensureUserPrimaryAgentProfile } from '@/lib/agent-profile';
+import type { WebSearchResult } from '@/lib/web-search';
 
 const DEFAULT_MAX_CONTEXT_MESSAGES = 20;
 
-type ChatChannel = 'web' | 'hermes';
+type ChatChannel = AgentChannel;
 
 export interface ChatTurnParams {
   userId: number;
@@ -19,7 +22,7 @@ export interface ChatTurnParams {
 }
 
 export interface ChatTurnResult {
-  status: 'ok' | 'insufficient_tokens' | 'already_processed' | 'error';
+  status: 'ok' | 'insufficient_tokens' | 'already_processed' | 'tool_unavailable' | 'error';
   reply?: string;
   usage?: ChatResult['usage'];
   remainingTokens?: number;
@@ -48,15 +51,8 @@ export async function processUserChatTurn(
 
   await ensureUserPrimaryAgentProfile(params.userId);
   const agentProfile = await getActiveAgentProfile(db, params.userId);
-  const agentContext = await buildAgentSystemContext(params.userId);
-  const messages = await buildChatMessages(
-    db,
-    params.userId,
-    withRuntimeContext(agentContext.combinedPrompt, channel),
-    params.message,
-  );
-
   const threadId = params.threadId ?? `chat_${params.userId}_${Date.now().toString(36)}`;
+
   if (params.externalMessageId) {
     const existingConversation = await db.query<{ thread_id: string; content: string | null }>(
       "SELECT thread_id, content FROM conversations WHERE channel = ? AND external_message_id = ? LIMIT 1",
@@ -81,6 +77,35 @@ export async function processUserChatTurn(
     }
   }
 
+  const runtimeContext = await buildCompleteAgentRuntimeContext({
+    userId: params.userId,
+    channel,
+    message: params.message,
+  });
+  await logSearchToolCall(db, {
+    userId: params.userId,
+    agentProfileId: agentProfile.id,
+    threadId,
+    channel,
+    searchResult: runtimeContext.searchResult,
+  });
+  const unavailableToolReply = getUnavailableToolReply(runtimeContext.searchResult);
+  if (unavailableToolReply) {
+    return {
+      status: 'tool_unavailable',
+      reply: unavailableToolReply,
+      remainingTokens: params.tokenBalance,
+      threadId,
+      message: unavailableToolReply,
+    };
+  }
+  const messages = await buildChatMessages(
+    db,
+    params.userId,
+    runtimeContext.systemPrompt,
+    params.message,
+  );
+
   const deepSeekResult = params.chatCompletion
     ? await params.chatCompletion(messages)
     : await callDeepSeekChat(messages, requireEnv('DEEPSEEK_API_KEY'));
@@ -104,6 +129,18 @@ export async function processUserChatTurn(
     return finalizeResult;
   }
 
+  if (finalizeResult.status === 'ok') {
+    await maybeCaptureExplicitMemory({
+      db,
+      userId: params.userId,
+      agentProfileId: agentProfile.id,
+      message: params.message,
+      threadId,
+    }).catch((err) => {
+      console.error('[chat-turn] explicit memory capture failed:', err);
+    });
+  }
+
   return {
     status: finalizeResult.status,
     reply: deepSeekResult.content,
@@ -111,6 +148,15 @@ export async function processUserChatTurn(
     remainingTokens: finalizeResult.remainingTokens,
     threadId,
   };
+}
+
+function getUnavailableToolReply(searchResult?: WebSearchResult): string | null {
+  if (!searchResult) return null;
+  if (searchResult.status === 'ok') return null;
+  if (searchResult.status === 'disabled') {
+    return '我现在还没有接入联网搜索工具，不能查询实时信息。';
+  }
+  return '我刚才尝试查询实时信息失败了，不能确定最新结果。';
 }
 
 async function getActiveAgentProfile(
@@ -158,25 +204,6 @@ async function buildChatMessages(
   return messages;
 }
 
-function withRuntimeContext(systemPrompt: string, channel: ChatChannel): string {
-  const now = new Date();
-  const timeZone = 'Asia/Shanghai';
-  const formatted = new Intl.DateTimeFormat('zh-CN', {
-    timeZone,
-    dateStyle: 'full',
-    timeStyle: 'medium',
-    hour12: false,
-  }).format(now);
-
-  return `${systemPrompt}
-
-[运行时上下文]
-- 当前时间：${formatted}
-- 当前时区：${timeZone}
-- 当前渠道：${channel}
-- 如果用户询问当前时间或日期，直接使用以上运行时上下文回答。`;
-}
-
 interface FinalizeChatTurnParams {
   userId: number;
   threadId: string;
@@ -190,6 +217,45 @@ interface FinalizeChatTurnParams {
   agentProfileId: number;
   channel: ChatChannel;
   externalMessageId: string | null;
+}
+
+async function logSearchToolCall(
+  db: DatabaseAdapter,
+  params: {
+    userId: number;
+    agentProfileId: number;
+    threadId: string;
+    channel: ChatChannel;
+    searchResult?: WebSearchResult;
+  },
+): Promise<void> {
+  if (!params.searchResult) return;
+  try {
+    await db.execute(
+      `INSERT INTO agent_tool_calls
+        (user_id, agent_profile_id, thread_id, channel, tool_name, provider, query, status,
+         result_summary, error, duration_ms, estimated_cost_cents, created_at)
+       VALUES (?, ?, ?, ?, 'web_search', ?, ?, ?, ?, ?, ?, 0, datetime('now'))`,
+      [
+        params.userId,
+        params.agentProfileId,
+        params.threadId,
+        params.channel,
+        params.searchResult.provider,
+        params.searchResult.query,
+        params.searchResult.status,
+        params.searchResult.summary.slice(0, 1200),
+        params.searchResult.error ?? null,
+        params.searchResult.durationMs,
+      ],
+    );
+  } catch (err) {
+    await logSystemEvent('agent_tool_call.log_failed', {
+      user_id: params.userId,
+      thread_id: params.threadId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 async function finalizeChatTurn(

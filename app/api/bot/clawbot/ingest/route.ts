@@ -142,10 +142,14 @@ export async function POST(req: NextRequest) {
         : undefined,
     });
 
-    if (result.status === 'ok' || result.status === 'already_processed') {
+    if (result.status === 'ok' || result.status === 'already_processed' || result.status === 'tool_unavailable') {
       return NextResponse.json({
         ok: true,
-        action: result.status === 'already_processed' ? 'duplicate' : 'chat_reply',
+        action: result.status === 'already_processed'
+          ? 'duplicate'
+          : result.status === 'tool_unavailable'
+            ? 'tool_unavailable'
+            : 'chat_reply',
         reply: result.reply ?? '这条消息已经处理过了。',
         tokens_charged: result.usage?.total_tokens ?? 0,
         remaining_balance: result.remainingTokens ?? tokenBalance,

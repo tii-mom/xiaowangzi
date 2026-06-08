@@ -124,14 +124,19 @@ async function handleHermesChatMessage(params: {
     threadId: `hermes_${params.messageId}`,
   });
 
-  if (result.status === 'ok' || result.status === 'already_processed') {
+  if (result.status === 'ok' || result.status === 'already_processed' || result.status === 'tool_unavailable') {
+    const action = result.status === 'already_processed'
+      ? 'duplicate'
+      : result.status === 'tool_unavailable'
+        ? 'tool_unavailable'
+        : 'chat_reply';
     await db.execute(
-      "UPDATE hermes_messages SET status = 'processed', action = 'chat_reply', processed_at = datetime('now') WHERE message_id = ?",
-      [params.messageId],
+      "UPDATE hermes_messages SET status = 'processed', action = ?, processed_at = datetime('now') WHERE message_id = ?",
+      [action, params.messageId],
     );
     return NextResponse.json({
       ok: true,
-      action: 'chat_reply',
+      action,
       reply: result.reply ?? '这条消息已经处理过了。',
       tokens_charged: result.usage?.total_tokens ?? 0,
       remaining_balance: result.remainingTokens ?? tokenBalance,

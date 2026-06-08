@@ -79,6 +79,8 @@ async function main() {
   assert(capturedPrompt.includes('[运行时上下文]'), 'system prompt 包含运行时上下文');
   assert(capturedPrompt.includes('当前时区：Asia/Shanghai'), 'system prompt 包含当前时区');
   assert(capturedPrompt.includes('当前渠道：hermes'), 'system prompt 包含 Hermes 渠道');
+  assert(capturedPrompt.includes('[稳定记忆]'), 'system prompt 包含稳定记忆段');
+  assert(capturedPrompt.includes('[工具上下文]'), '普通聊天包含未触发搜索说明');
 
   const convRows = await db.query(
     "SELECT role, channel, external_message_id, agent_profile_id FROM conversations WHERE thread_id = ? ORDER BY id ASC",
@@ -169,6 +171,42 @@ async function main() {
   });
   assert(poorResult.status === 'insufficient_tokens', '余额不足返回 insufficient_tokens');
   assert(deepSeekCalls === 2, '余额不足不调用 DeepSeek');
+
+  console.log('\n=== 5. 实时问题但搜索工具未配置 ===');
+  const toolUserId = 93003;
+  await db.execute(
+    "INSERT INTO users (id, token_balance, status) VALUES (?, ?, 'active')",
+    [toolUserId, initialBalance],
+  );
+  await ensureUserPrimaryAgentProfile(toolUserId);
+  const unavailable = await processUserChatTurn({
+    userId: toolUserId,
+    tokenBalance: initialBalance,
+    message: '今天成都天气怎么样？',
+    minTokenBalance: 10000,
+    channel: 'hermes',
+    externalMessageId: `wx_tool_${Date.now().toString(36)}`,
+    chatCompletion: async () => {
+      deepSeekCalls++;
+      return {
+        content: '不应该调用',
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      };
+    },
+  });
+  assert(unavailable.status === 'tool_unavailable', `搜索未配置返回 tool_unavailable (${unavailable.status})`);
+  assert(String(unavailable.reply).includes('联网搜索工具'), '搜索未配置时短答说明工具不可用');
+  assert(deepSeekCalls === 2, '搜索工具未配置不调用 DeepSeek');
+  const toolLedgerRows = await db.query(
+    "SELECT id FROM token_ledger WHERE user_id = ? AND type = 'usage'",
+    [toolUserId],
+  );
+  assert(toolLedgerRows.results.length === 0, '搜索工具未配置不扣费');
+  const toolCallRows = await db.query(
+    "SELECT status, tool_name FROM agent_tool_calls WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+    [toolUserId],
+  );
+  assert(toolCallRows.results[0]?.status === 'disabled', '搜索工具调用审计 status=disabled');
 
   console.log(`\n=== 结果: ${failures === 0 ? '全部通过 ✅' : `${failures} 个失败 ❌`} ===`);
   process.exit(failures === 0 ? 0 : 1);

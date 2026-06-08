@@ -35,7 +35,11 @@ export async function POST(req: NextRequest) {
     });
     threadId = result.threadId;
 
-    if (result.status !== 'ok' && result.status !== 'already_processed') {
+    if (
+      result.status !== 'ok' &&
+      result.status !== 'already_processed' &&
+      result.status !== 'tool_unavailable'
+    ) {
       const db = getDb();
       await insertSystemEvent(db, 'chat.send_failed', {
         user_id: user.id,
