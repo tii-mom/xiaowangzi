@@ -46,7 +46,8 @@
         "NEXT_PUBLIC_APP_URL": "https://wan.lat",
         "BUFPAY_NOTIFY_URL": "https://wan.lat/api/pay/notify",
         "BUFPAY_RETURN_URL": "https://wan.lat/dashboard",
-        "BUFPAY_AMOUNT_TOLERANCE_CENTS": "0"
+        "BUFPAY_AMOUNT_TOLERANCE_CENTS": "0",
+        "CLAWBOT_BIND_BASE_URL": "http://43.167.220.227/xms/wechat/bind"
       },
       "d1_databases": [
         {
