@@ -101,7 +101,9 @@ export async function POST(req: NextRequest) {
       "SELECT agent_profile_id FROM agent_bindings WHERE channel = 'wechat' AND external_id = ? AND status = 'active' LIMIT 1",
       [providerUserId],
     );
-    if (existingExternal.results.length > 0) {
+    const existingExternalProfileId = existingExternal.results[0]?.agent_profile_id as number | undefined;
+    const isSameBindingRefresh = existingExternalProfileId === ticketRow.agent_profile_id;
+    if (existingExternalProfileId && !isSameBindingRefresh) {
       return NextResponse.json({ ok: false, error: 'wechat_already_bound' }, { status: 409 });
     }
 
@@ -109,33 +111,46 @@ export async function POST(req: NextRequest) {
       "SELECT external_id FROM agent_bindings WHERE channel = 'wechat' AND agent_profile_id = ? AND status = 'active' LIMIT 1",
       [ticketRow.agent_profile_id],
     );
-    if (existingProfile.results.length > 0) {
+    const existingProfileExternalId = existingProfile.results[0]?.external_id as string | undefined;
+    if (existingProfileExternalId && existingProfileExternalId !== providerUserId) {
       return NextResponse.json({ ok: false, error: 'profile_already_bound' }, { status: 409 });
     }
 
+    const metadataJson = JSON.stringify({
+      provider: 'clawbot',
+      nickname: body.nickname ?? null,
+      avatarUrl: body.avatarUrl ?? null,
+      source: body.source ?? 'clawbot_gateway',
+      refreshed: isSameBindingRefresh,
+    });
+
+    const bindingStatement = isSameBindingRefresh
+      ? {
+          sql: `UPDATE agent_bindings
+                SET metadata_json = ?, updated_at = datetime('now')
+                WHERE channel = 'wechat' AND external_id = ? AND status = 'active'`,
+          params: [metadataJson, providerUserId],
+        }
+      : {
+          sql: `INSERT INTO agent_bindings
+                (agent_profile_id, channel, external_id, status, metadata_json, created_at, updated_at)
+                VALUES (?, 'wechat', ?, 'active', ?, datetime('now'), datetime('now'))`,
+          params: [
+            ticketRow.agent_profile_id,
+            providerUserId,
+            metadataJson,
+          ],
+        };
+
     await db.batch([
-      {
-        sql: `INSERT INTO agent_bindings
-              (agent_profile_id, channel, external_id, status, metadata_json, created_at, updated_at)
-              VALUES (?, 'wechat', ?, 'active', ?, datetime('now'), datetime('now'))`,
-        params: [
-          ticketRow.agent_profile_id,
-          providerUserId,
-          JSON.stringify({
-            provider: 'clawbot',
-            nickname: body.nickname ?? null,
-            avatarUrl: body.avatarUrl ?? null,
-            source: body.source ?? 'clawbot_gateway',
-          }),
-        ],
-      },
+      bindingStatement,
       {
         sql: "UPDATE bind_codes SET status = 'consumed', hermes_user_id = ?, consumed_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'pending'",
         params: [providerUserId, ticketRow.id],
       },
     ]);
 
-    await writeSystemEvent('clawbot.binding.created', {
+    await writeSystemEvent(isSameBindingRefresh ? 'clawbot.binding.refreshed' : 'clawbot.binding.created', {
       user_id: ticketRow.user_id,
       agent_profile_id: ticketRow.agent_profile_id,
       provider_user_id: maskExternalId(providerUserId),

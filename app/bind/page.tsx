@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Sparkles, QrCode, CheckCircle2, AlertTriangle } from 'lucide-react';
 
@@ -21,8 +21,24 @@ export default function BindPage() {
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [isBound, setIsBound] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [creatingTicket, setCreatingTicket] = useState(false);
   const [hermesId, setHermesId] = useState<string | null>(null);
   const [needSession, setNeedSession] = useState(false);
+
+  const createTicket = useCallback(async (cancelled = false) => {
+    setCreatingTicket(true);
+    try {
+      const cRes = await fetch('/api/bot/clawbot/bind-ticket', { method: 'POST' });
+      const cData = await cRes.json() as Record<string, unknown>;
+      if (cancelled) return;
+      if (cData.error && cRes.status === 401) { setNeedSession(true); return; }
+      setBindUrl(String(cData.bind_url ?? ''));
+      setTicket(String(cData.ticket ?? ''));
+      setExpiresAt(String(cData.expires_at ?? ''));
+    } finally {
+      if (!cancelled) setCreatingTicket(false);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,18 +49,12 @@ export default function BindPage() {
       if (isBoundStatus(sData)) { setIsBound(true); setHermesId(sData.masked_external_id ?? null); setLoading(false); return; }
       if (sData.error && sRes.status === 401) { setNeedSession(true); setLoading(false); return; }
 
-      const cRes = await fetch('/api/bot/clawbot/bind-ticket', { method: 'POST' });
-      const cData = await cRes.json() as Record<string, unknown>;
-      if (cancelled) return;
-      if (cData.error && cRes.status === 401) { setNeedSession(true); setLoading(false); return; }
-      setBindUrl(String(cData.bind_url ?? ''));
-      setTicket(String(cData.ticket ?? ''));
-      setExpiresAt(String(cData.expires_at ?? ''));
+      await createTicket(cancelled);
       setLoading(false);
     }
     init();
     return () => { cancelled = true; };
-  }, []);
+  }, [createTicket]);
 
   useEffect(() => {
     if (isBound || needSession) return;
@@ -86,6 +96,25 @@ export default function BindPage() {
             <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto" />
             <h2 className="text-lg font-bold text-emerald-300">绑定成功!</h2>
             <p className="text-sm text-slate-400">用户标识: <span className="font-mono text-white">{hermesId ?? '已绑定'}</span></p>
+            <p className="text-xs text-slate-500 leading-relaxed">如果微信顶部显示“暂无法连接”，请重新连接微信通道刷新 Clawbot 授权。</p>
+            <button
+              onClick={() => createTicket()}
+              disabled={creatingTicket}
+              className="px-5 py-2 text-xs font-bold text-slate-950 bg-amber-400 rounded-full hover:bg-amber-500 disabled:opacity-60"
+            >
+              {creatingTicket ? '生成中...' : '重新连接微信通道'}
+            </button>
+            {bindUrl && (
+              <div className="space-y-3 pt-2 border-t border-white/10">
+                <p className="text-xs text-slate-400">刷新连接 ticket</p>
+                <p className="text-[11px] font-mono text-amber-300 break-all">{ticket}</p>
+                <a href={bindUrl} target="_blank" rel="noreferrer" className="inline-block px-5 py-2 text-xs font-bold text-slate-950 bg-amber-400 rounded-full hover:bg-amber-500">
+                  打开绑定页
+                </a>
+                <p className="text-xs text-slate-500 break-all">{bindUrl}</p>
+                <p className="text-xs text-slate-500">扫码确认后会刷新连接{expiresAt ? ` · ${new Date(expiresAt).toLocaleTimeString()}前有效` : ''}</p>
+              </div>
+            )}
             <Link href="/dashboard" className="inline-block text-xs text-amber-400 underline">前往仪表盘</Link>
           </div>
         ) : (
