@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 export default function PrivacyPage() {
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100 font-sans">
@@ -39,7 +41,7 @@ export default function PrivacyPage() {
         <p>小王子 SoulMate 由 AI 模型驱动，对话内容由 AI 生成。我们不保证 AI 回复的准确性，也不以此提供医疗或心理治疗建议。</p>
 
         <div className="pt-8 text-center">
-          <a href="/" className="text-xs text-slate-500 hover:text-amber-400 underline">← 返回首页</a>
+          <Link href="/" className="text-xs text-slate-500 hover:text-amber-400 underline">← 返回首页</Link>
         </div>
       </div>
     </div>

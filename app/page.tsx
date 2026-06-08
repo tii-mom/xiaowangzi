@@ -6,11 +6,12 @@ import Modal from '@/components/Modal';
 import Header from '@/components/Header';
 import HeroSection from '@/components/HeroSection';
 import ChatPanel from '@/components/ChatPanel';
+import GrowthOnboarding from '@/components/GrowthOnboarding';
 import MorningCard from '@/components/MorningCard';
 import ActionCard from '@/components/ActionCard';
 import NightQuestions from '@/components/NightQuestions';
 import AvatarBlindBox from '@/components/AvatarBlindBox';
-import BindFlowMock from '@/components/BindFlowMock';
+import BindCallout from '@/components/BindCallout';
 import PricingCards, { type PlanSelection } from '@/components/PricingCards';
 import PaymentModal from '@/components/PaymentModal';
 import SafetyNote from '@/components/SafetyNote';
@@ -97,7 +98,7 @@ export default function Home() {
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 rounded-full border-2 border-[#fcd34d]/20 border-t-[#fcd34d] animate-spin" />
           <span className="text-xs tracking-wider animate-pulse font-medium">
-            B612 行星轨道连线中...
+            Z-27 行星轨道连线中...
           </span>
         </div>
       </div>
@@ -137,6 +138,8 @@ export default function Home() {
           <HeroSection onScrollTo={scrollToId} />
           <ChatPanel onToast={triggerToast} />
         </section>
+
+        <GrowthOnboarding onToast={triggerToast} />
 
         <section className="space-y-8 py-2.5" id="section-experience">
           <div className="text-center space-y-3">
@@ -255,7 +258,7 @@ export default function Home() {
 
         <AvatarBlindBox onToast={triggerToast} onAlert={openAlert} />
 
-        <BindFlowMock onToast={triggerToast} onAlert={openAlert} />
+        <BindCallout />
 
         <PricingCards onSelectPlan={handleSelectPlan} />
 

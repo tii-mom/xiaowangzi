@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 export default function TermsPage() {
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100 font-sans">
@@ -31,7 +33,7 @@ export default function TermsPage() {
         <p>如有问题，请联系：yudeyou0118@gmail.com</p>
 
         <div className="pt-8 text-center">
-          <a href="/" className="text-xs text-slate-500 hover:text-amber-400 underline">← 返回首页</a>
+          <Link href="/" className="text-xs text-slate-500 hover:text-amber-400 underline">← 返回首页</Link>
         </div>
       </div>
     </div>

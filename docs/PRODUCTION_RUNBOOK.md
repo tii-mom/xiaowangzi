@@ -25,7 +25,7 @@ npx wrangler deploy --env production
 
 ### 初始化表结构与迁移
 ```bash
-# 执行数据库迁移 (0001 - 0004) 到生产环境
+# 执行数据库迁移 (0001 - 0006) 到生产环境
 npx wrangler d1 migrations apply xiaowangzi-production --remote --env production
 ```
 
@@ -34,7 +34,7 @@ npx wrangler d1 migrations apply xiaowangzi-production --remote --env production
 # 查询生成环境所有的表结构
 npx wrangler d1 execute xiaowangzi-production --remote --command "SELECT name FROM sqlite_master WHERE type='table';"
 ```
-**期望结果**: 必须包含 `users`, `auth_sessions`, `bind_codes`, `token_ledger`, `user_agents`, `conversations`, `system_events`, `admin_audit_logs`, `payment_orders`, `subscriptions` 共 10 张核心业务表。
+**期望结果**: 必须包含 `users`, `auth_sessions`, `bind_codes`, `token_ledger`, `user_agents`, `conversations`, `system_events`, `admin_audit_logs`, `payment_orders`, `subscriptions` 共 10 张基础业务表，并包含 `agent_profiles`, `agent_core_documents`, `agent_bindings`, `hermes_messages` 等 PR-HERMES1/2 表。
 
 ---
 

@@ -384,8 +384,9 @@ class MockAdapter implements DatabaseAdapter {
             row[col] = Number.isNaN(v) ? expr : v;
           }
         } else {
-          const v = parseInt(expr.replace(/[^0-9-]/g, ''), 10);
-          row[col] = Number.isNaN(v) ? expr : v;
+          const cleaned = expr.replace(/^['"]/, '').replace(/['"]$/, '');
+          const v = /^-?\d+$/.test(cleaned) ? parseInt(cleaned, 10) : NaN;
+          row[col] = Number.isNaN(v) ? cleaned : v;
         }
       }
     }

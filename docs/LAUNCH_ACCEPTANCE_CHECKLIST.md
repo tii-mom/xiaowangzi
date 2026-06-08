@@ -15,8 +15,8 @@
 
 ## 3. D1 (生产数据库)
 - [x] 独立生产数据库 `xiaowangzi-production` 已激活。
-- [x] `0001` - `0004` 结构迁移全部应用完毕。
-- [x] 远程 D1 表结构验证通过（共 10 张核心业务表完整存在）。
+- [x] `0001` - `0006` 结构迁移应全部应用完毕，包含 Agent Profile/Core Document/Binding 与 Hermes 消息去重表。
+- [x] 远程 D1 表结构验证通过：基础 10 张业务表 + PR-HERMES1/2 新增表与字段完整存在。
 
 ## 4. Secrets (敏感密钥)
 - [x] 所有必需生产 Secret 已在 Cloudflare 后台配置完毕（`SESSION_SECRET`, `ADMIN_TOKEN`, `DEEPSEEK_API_KEY`, `HERMES_WEBHOOK_SECRET`, `BUFPAY_AID`, `BUFPAY_APP_SECRET`）。
@@ -42,7 +42,7 @@
 
 ## 9. DeepSeek (大模型对话)
 - [x] 实盘大模型路由（`deepseek-v4-flash`）测试通过：
-  - 成功接收并返回 Assistant 真实 reply (`"B612"`)。
+  - 成功接收并返回 Assistant 真实 reply (`"Z-27"`)。
   - Token 消耗被精确记入 `token_ledger` (`delta_tokens = -476`)。
   - 扣划后的余额被安全记录，`conversations` 表正确生成对话纪录。
 
@@ -59,6 +59,7 @@
 
 ## 13. Known Unverified Items (已知未验证/未上线范围)
 - [ ] 支付宝生产真实付款通道未进行实扫扣款（Staging 已通过 0.10 元通道闭环校验）。
+- [ ] 微信 29 元生产实扫状态需以最新运营付款凭证再次确认；若无凭证，不得仅凭 staging 0.10 元测试标记为生产已实扫。
 - [ ] 99 元与 399 元大额正式套餐未执行实扫扣款。
 - [ ] `HermesAgentManager` 外部同步在生产环境未实测。
 - [ ] Wallet（钱包余额充值及消费）未上线。

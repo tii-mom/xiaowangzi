@@ -2,6 +2,31 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getPaymentUser, PaymentAuthError } from '@/lib/payment-user';
 
+function maskExternalId(id: string | null): string | null {
+  if (!id) return null;
+  if (id.length <= 6) return '***';
+  return `${id.slice(0, 4)}***${id.slice(-3)}`;
+}
+
+function bindStatusResponse(
+  status: string,
+  options: {
+    expires_at?: string | null;
+    bound_at?: unknown;
+    masked_external_id?: string | null;
+  } = {},
+) {
+  const normalizedStatus = status === 'consumed' ? 'bound' : status;
+  return {
+    status: normalizedStatus,
+    is_bound: normalizedStatus === 'bound',
+    expires_at: options.expires_at ?? null,
+    bound_at: options.bound_at ?? null,
+    channel: 'wechat',
+    masked_external_id: options.masked_external_id ?? null,
+  };
+}
+
 export async function GET(req: NextRequest) {
   try {
     let user;
@@ -16,22 +41,56 @@ export async function GET(req: NextRequest) {
 
     const db = getDb();
 
-    const codes = await db.query(
-      "SELECT code, status, expires_at, created_at FROM bind_codes WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
-      [user.id],
+    // 1. 获取用户的 Primary Profile ID
+    const profileRes = await db.query(
+      "SELECT id FROM agent_profiles WHERE user_id = ? AND is_primary = 1 AND status = 'active' LIMIT 1",
+      [user.id]
+    );
+    const profileId = profileRes.results[0]?.id as number | undefined;
+
+    if (!profileId) {
+      return NextResponse.json(bindStatusResponse('unbound'));
+    }
+
+    // 2. 检查是否存在活跃的 wechat 绑定
+    const bindingRes = await db.query(
+      "SELECT external_id, created_at FROM agent_bindings WHERE agent_profile_id = ? AND channel = 'wechat' AND status = 'active' LIMIT 1",
+      [profileId]
     );
 
-    const bound = await db.query(
-      'SELECT hermes_user_id, wechat_external_id FROM users WHERE id = ?',
-      [user.id],
+    if (bindingRes.results.length > 0) {
+      const bindingRow = bindingRes.results[0] as Record<string, unknown>;
+      return NextResponse.json(bindStatusResponse('bound', {
+        bound_at: bindingRow.created_at,
+        masked_external_id: maskExternalId(bindingRow.external_id as string),
+      }));
+    }
+
+    // 3. 查询最新绑定 ticket/code
+    const codeRes = await db.query(
+      "SELECT id, code, status, expires_at, created_at FROM bind_codes WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+      [user.id]
     );
 
-    return NextResponse.json({
-      bind_code: codes.results[0] ?? null,
-      hermes_user_id: (bound.results[0]?.hermes_user_id as string) ?? null,
-      wechat_external_id: (bound.results[0]?.wechat_external_id as string) ?? null,
-      is_bound: Boolean((bound.results[0]?.hermes_user_id as string) || (bound.results[0]?.wechat_external_id as string)),
-    });
+    if (codeRes.results.length === 0) {
+      return NextResponse.json(bindStatusResponse('unbound'));
+    }
+
+    const codeRow = codeRes.results[0] as Record<string, unknown>;
+    const codeId = codeRow.id as number;
+    const expiresAt = codeRow.expires_at as string;
+    let status = codeRow.status as string;
+
+    // 4. 自动处理过期时间
+    if (status === 'pending' && new Date().toISOString() > expiresAt) {
+      await db.execute(
+        "UPDATE bind_codes SET status = 'expired', updated_at = datetime('now') WHERE id = ?",
+        [codeId]
+      );
+      status = 'expired';
+    }
+
+    return NextResponse.json(bindStatusResponse(status, { expires_at: expiresAt }));
   } catch (err) {
     console.error('[bind/status]', err);
     return NextResponse.json(

@@ -2,17 +2,17 @@
 
 ## 概览
 
-- **Web 框架**: Next.js 15+ (App Router) 部署于腾讯云服务器
+- **Web 框架**: Next.js 15+ (App Router) 部署于 Cloudflare Workers / OpenNext
 - **AI 对话模型**: DeepSeek v4 flash (deepseek-v4-flash)
 - **支付**: BufPay 个人支付网关
 - **数据库**: Cloudflare D1 (通过 REST API 或适配器访问)
-- **消息网关**: Hermes Agent (微信消息收发、子 Agent 管理)
+- **消息网关**: Hermes / Clawbot (Cloudflare 侧支持 Clawbot 网页扫码绑定与普通聊天 webhook；腾讯云真实微信链路待 staging 联调)
 - **Token 账本**: 自建 token_ledger 表，基于 DeepSeek 返回的 `usage` 精确扣费
 
 ## 核心数据流
 
 ```
-用户微信 → Hermes Gateway → Webhook → Next.js API
+用户微信 → Hermes / Clawbot Bridge → Webhook → Next.js API
                                       ↓
                               鉴权 / 路由 / Token 检查
                                       ↓
@@ -26,13 +26,16 @@
 ## 部署拓扑
 
 ```
-[腾讯云 CVM]
-  ├── Nginx (反向代理 + SSL)
-  ├── Next.js standalone (PM2)
+[Cloudflare Workers]
+  ├── Next.js App Router / API Routes
+  ├── OpenNext runtime
   └── 静态资源
 
 [Cloudflare D1]
-  └── REST API 访问
+  └── D1 Binding 优先，REST API 作为本地/脚本 fallback
+
+[腾讯云 CVM]
+  └── Hermes 微信长连接网关（后续阶段）
 
 [外部服务]
   ├── api.deepseek.com (DeepSeek API)
@@ -50,9 +53,9 @@
 | 支付闭环 lib/bufpay.ts | BufPay 订单/回调 | PR-2 |
 | AI 对话 lib/deepseek.ts | DeepSeek API 调用 | PR-3 |
 | Token 计费 | token_ledger 精确扣费 | PR-3 |
-| Hermes 集成 | 微信消息、子 Agent | PR-4/PR-5 |
+| Hermes 集成 | Clawbot 网页扫码绑定与普通聊天 webhook 已接入 Cloudflare；腾讯云 Bridge 待 staging 联调 | PR-HERMES3/4/5 |
 | 用户面板 | /dashboard, /pay, /bind | PR-6 |
-| 部署上线 | PM2 + Nginx + SSL | PR-7 |
+| 部署上线 | Cloudflare Workers + D1；腾讯云仅保留 Hermes | PR-CF6 / PR-HERMES3+ |
 
 ## Token 计费原则
 

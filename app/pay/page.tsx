@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { Sparkles, CheckCircle2 } from 'lucide-react';
 import { PLANS } from '@/lib/plans';
 
@@ -119,7 +120,7 @@ export default function PayPage() {
         )}
 
         <div className="text-center">
-          <a href="/" className="text-xs text-slate-500 hover:text-amber-400 underline">← 返回首页</a>
+          <Link href="/" className="text-xs text-slate-500 hover:text-amber-400 underline">← 返回首页</Link>
         </div>
       </div>
     </div>

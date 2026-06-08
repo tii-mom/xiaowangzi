@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { Shield, Users, ShoppingCart, Coins, Activity } from 'lucide-react';
 
 interface Overview {
@@ -101,7 +102,7 @@ export default function AdminPage() {
             <button onClick={() => { setData(null); setError(''); sessionStorage.removeItem('admin_token'); }} className="text-xs text-slate-500 hover:text-amber-400 underline">切换Token</button>
           </>
         )}
-        <div className="text-center"><a href="/" className="text-xs text-slate-500 hover:text-amber-400 underline">← 返回首页</a></div>
+        <div className="text-center"><Link href="/" className="text-xs text-slate-500 hover:text-amber-400 underline">← 返回首页</Link></div>
       </div>
     </div>
   );

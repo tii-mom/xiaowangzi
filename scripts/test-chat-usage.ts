@@ -24,6 +24,7 @@ async function runTests() {
 
   const uid1 = 91001;
   const uid2 = 91002;
+  const uid3 = 91003;
   const initialBalance = 50000;
   const useTokens = 1234;
   const thread1 = `t1_${Date.now().toString(36)}`;
@@ -31,6 +32,7 @@ async function runTests() {
   // ---- 准备 ----
   await db.execute('INSERT INTO users (id, token_balance, status) VALUES (?, ?, ?)', [uid1, initialBalance, 'active']);
   await db.execute('INSERT INTO users (id, token_balance, status) VALUES (?, ?, ?)', [uid2, 100, 'active']);
+  await db.execute('INSERT INTO users (id, token_balance, status) VALUES (?, ?, ?)', [uid3, initialBalance, 'active']);
 
   // ---- 1. zero ----
   console.log('=== 1. totalTokens=0 → error ===');
@@ -109,6 +111,18 @@ async function runTests() {
   const finalU1 = await db.query('SELECT token_balance FROM users WHERE id = ?', [uid1]);
   assert((finalU1.results[0]?.token_balance as number) === initialBalance - useTokens,
     `final balance = ${initialBalance - useTokens}`);
+
+  // ---- 6. Agent Core Document prompt assembly ----
+  console.log('\n=== 6. Agent Core Document 装配 ===');
+  const {
+    DEFAULT_CORE_DOC_CONTENT,
+    buildAgentSystemContext,
+    ensureUserPrimaryAgentProfile,
+  } = await import('../lib/agent-profile');
+  await ensureUserPrimaryAgentProfile(uid3);
+  const ctx = await buildAgentSystemContext(uid3);
+  assert(ctx.combinedPrompt.includes(DEFAULT_CORE_DOC_CONTENT), 'combinedPrompt 包含默认 Core Document');
+  assert(ctx.combinedPrompt.includes('陪伴用户的温柔小王子'), 'combinedPrompt 包含 persona summary');
 
   console.log(`\n=== 结果: ${failures === 0 ? '全部通过 ✅' : `${failures} 个失败 ❌`} ===`);
   process.exit(failures === 0 ? 0 : 1);
